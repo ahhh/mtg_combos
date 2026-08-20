@@ -1,0 +1,5 @@
+node_modules/
+.DS_Store
+*.log
+# Bulk download cache used by tools/bake-combos.mjs
+*.json.gz

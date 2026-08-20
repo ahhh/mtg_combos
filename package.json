@@ -1,0 +1,19 @@
+{
+  "name": "mtg-combo-explorer",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "Static single-file MTG combo explorer: verified combos plus a deterministic hypothesis engine.",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "eval": "node tools/eval-engine.mjs",
+    "bake": "node tools/bake-combos.mjs",
+    "serve": "node tools/serve.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}

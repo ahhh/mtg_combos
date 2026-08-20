@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "shards": 128,
+  "generated": "2026-08-20T11:24:33.766Z",
+  "source": "https://commanderspellbook.com/",
+  "variantsSeen": 109368,
+  "combosKept": 105271,
+  "cardsIndexed": 7378,
+  "maxPerCard": 60,
+  "cardsTruncated": 1323
+}

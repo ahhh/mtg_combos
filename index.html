@@ -1,0 +1,2295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MTG Combo Explorer</title>
+<meta name="description" content="Search a Magic: The Gathering card to see verified combos from Commander Spellbook and rule-template combo hypotheses derived from Oracle text.">
+<meta name="color-scheme" content="dark light">
+<!--
+  connect-src / img-src are the controls that actually matter here: they cap
+  where this page can send data and where it can pull pixels from. 'unsafe-inline'
+  is unavoidable for a single-file artifact, so we lean on the egress pins instead.
+-->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'none';
+  script-src 'unsafe-inline';
+  style-src 'unsafe-inline';
+  img-src 'self' https://cards.scryfall.io data:;
+  connect-src 'self' https://api.scryfall.com;
+  font-src 'self';
+  base-uri 'none';
+  form-action 'none';
+  frame-ancestors 'none'">
+<style>
+:root {
+  color-scheme: dark;
+  --bg:        #0d1117;
+  --surface:   #151b23;
+  --surface-2: #1c232d;
+  --line:      #2a3441;
+  --line-soft: #202833;
+  --text:      #e6edf3;
+  --text-dim:  #9aa7b4;
+  --text-mute: #6b7885;
+  --accent:    #2dd4bf;
+  --accent-dim:#134e4a;
+  --gold:      #d9a441;
+  --gold-dim:  #4a3a16;
+  --danger:    #f87171;
+  --warn:      #fbbf24;
+  --radius:    10px;
+  --radius-sm: 6px;
+  --shadow:    0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.55 var(--sans);
+  -webkit-text-size-adjust: 100%;
+  overflow-wrap: break-word;
+}
+h1, h2, h3 { line-height: 1.25; margin: 0; font-weight: 600; }
+a { color: var(--accent); }
+a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+
+/* ---------- skip link ---------- */
+.skip {
+  position: absolute; left: -9999px; top: 0; z-index: 100;
+  background: var(--accent); color: #06231f; padding: 10px 16px; font-weight: 600;
+}
+.skip:focus { left: 8px; top: 8px; }
+
+/* ---------- layout ---------- */
+.wrap { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
+
+header.top {
+  position: sticky; top: 0; z-index: 30;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line-soft);
+}
+.top-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 0 10px;
+}
+.brand {
+  display: flex; align-items: baseline; gap: 9px;
+  font-size: 15px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap;
+}
+.brand .mark {
+  width: 9px; height: 9px; border-radius: 2px; background: var(--accent);
+  box-shadow: 0 0 12px var(--accent); flex: none; transform: translateY(-1px);
+}
+.brand small { color: var(--text-mute); font-weight: 400; font-size: 11px; }
+.top-actions { margin-left: auto; display: flex; gap: 6px; }
+.ghost {
+  background: none; border: 1px solid var(--line); color: var(--text-dim);
+  border-radius: var(--radius-sm); padding: 5px 11px; font-size: 12.5px;
+}
+.ghost:hover { border-color: var(--accent); color: var(--text); }
+
+/* ---------- search ---------- */
+.search-shell { padding-bottom: 12px; position: relative; }
+.search-box { position: relative; display: flex; align-items: center; }
+.search-box svg { position: absolute; left: 13px; width: 17px; height: 17px; color: var(--text-mute); pointer-events: none; }
+#q {
+  width: 100%; padding: 12px 40px 12px 40px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  font: 16px/1.2 var(--sans);
+}
+#q::placeholder { color: var(--text-mute); }
+#q:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--accent-dim); }
+.clear-btn {
+  position: absolute; right: 8px; background: none; border: 0;
+  color: var(--text-mute); font-size: 18px; line-height: 1; padding: 6px 8px; border-radius: 4px;
+}
+.clear-btn:hover { color: var(--text); }
+
+#suggest {
+  position: absolute; left: 0; right: 0; top: calc(100% - 6px); z-index: 40;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  max-height: min(60vh, 420px); overflow-y: auto; padding: 4px; margin: 0; list-style: none;
+}
+#suggest[hidden] { display: none; }
+#suggest .grp {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-mute); padding: 8px 10px 4px;
+}
+#suggest li[role=option] {
+  padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+}
+#suggest li[aria-selected=true] { background: var(--surface-2); }
+#suggest li mark { background: none; color: var(--accent); font-weight: 600; }
+#suggest .cnt {
+  margin-left: auto; font-size: 11px; color: var(--gold);
+  border: 1px solid var(--gold-dim); border-radius: 20px; padding: 1px 7px; white-space: nowrap;
+}
+
+/* ---------- card panel ---------- */
+main { padding: 18px 0 80px; }
+.empty {
+  text-align: center; padding: 60px 20px; color: var(--text-dim);
+}
+.empty h2 { font-size: 19px; margin-bottom: 8px; color: var(--text); }
+.empty p { max-width: 52ch; margin: 0 auto 18px; }
+.chips { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; }
+.chip {
+  background: var(--surface); border: 1px solid var(--line); color: var(--text-dim);
+  border-radius: 20px; padding: 5px 13px; font-size: 13px;
+}
+.chip:hover { border-color: var(--accent); color: var(--text); }
+
+.card-panel {
+  display: grid; grid-template-columns: 210px 1fr; gap: 20px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 18px; margin-bottom: 20px;
+}
+.card-art {
+  width: 100%; aspect-ratio: 488/680; border-radius: 8px; object-fit: cover;
+  background: var(--surface-2); border: 1px solid var(--line);
+}
+.card-meta h2 { font-size: 22px; letter-spacing: -.02em; }
+.mana { font-family: var(--mono); color: var(--text-dim); font-size: 14px; }
+.type-line { color: var(--text-dim); font-size: 13.5px; margin: 6px 0 10px; }
+.oracle {
+  white-space: pre-wrap; font-size: 14px; color: var(--text);
+  background: var(--surface-2); border-left: 2px solid var(--line);
+  padding: 10px 12px; border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.roles { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.role {
+  font-size: 11.5px; padding: 3px 9px; border-radius: 4px;
+  background: var(--accent-dim); color: var(--accent); border: 1px solid transparent;
+  font-family: var(--mono);
+}
+.meta-links { margin-top: 12px; display: flex; gap: 14px; font-size: 13px; flex-wrap: wrap; }
+
+/* ---------- tabs ---------- */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+.tab {
+  background: none; border: 0; border-bottom: 2px solid transparent;
+  padding: 10px 14px; color: var(--text-dim); font-size: 14px; font-weight: 500;
+  display: flex; align-items: center; gap: 7px; margin-bottom: -1px;
+}
+.tab[aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); }
+.tab .n {
+  font-size: 11px; background: var(--surface-2); color: var(--text-dim);
+  border-radius: 20px; padding: 1px 7px; font-variant-numeric: tabular-nums;
+}
+.tab[aria-selected=true] .n { background: var(--accent-dim); color: var(--accent); }
+[role=tabpanel][hidden] { display: none; }
+
+/* ---------- results ---------- */
+.result {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); margin-bottom: 10px; overflow: hidden;
+}
+.result > summary {
+  padding: 13px 15px; cursor: pointer; list-style: none;
+  display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start;
+}
+.result > summary::-webkit-details-marker { display: none; }
+.result > summary:hover { background: var(--surface-2); }
+.r-cards { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.r-cards .plus { color: var(--text-mute); font-weight: 400; margin: 0 5px; }
+.r-out { color: var(--text-dim); font-size: 13px; margin-top: 4px; }
+.r-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+
+.badge {
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  font-size: 11px; font-weight: 600; letter-spacing: .02em;
+  padding: 3px 9px; border-radius: 20px; border: 1px solid;
+}
+.badge svg { width: 11px; height: 11px; }
+.b-verified { color: var(--gold); border-color: var(--gold-dim); background: rgba(217,164,65,.08); }
+.b-high     { color: var(--accent); border-color: var(--accent-dim); background: rgba(45,212,191,.08); }
+.b-medium   { color: var(--warn); border-color: #4a3a16; background: rgba(251,191,36,.07); }
+.b-lead     { color: var(--text-mute); border-color: var(--line); }
+
+.r-body { padding: 0 15px 15px; border-top: 1px solid var(--line-soft); }
+.r-sec { margin-top: 14px; }
+.r-sec h4 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--text-mute); margin-bottom: 7px; font-weight: 600;
+}
+.r-sec ul { margin: 0; padding-left: 18px; font-size: 13.5px; color: var(--text-dim); }
+.r-sec li { margin-bottom: 4px; }
+.r-sec li strong { color: var(--text); font-weight: 600; }
+
+.oblig { list-style: none; padding: 0; }
+.oblig li { display: flex; gap: 8px; align-items: baseline; margin-bottom: 6px; }
+.oblig .st { flex: none; font-family: var(--mono); font-size: 11px; width: 15px; text-align: center; }
+.st-met     { color: var(--accent); }
+.st-unknown { color: var(--warn); }
+.st-unmet   { color: var(--danger); }
+.ev { display: block; font-family: var(--mono); font-size: 11.5px; color: var(--text-mute); margin-top: 2px; }
+
+.partner-row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.partner-row img { width: 42px; height: 59px; border-radius: 4px; object-fit: cover; border: 1px solid var(--line); }
+
+.note {
+  font-size: 12.5px; color: var(--text-mute); background: var(--surface-2);
+  border-radius: var(--radius-sm); padding: 9px 11px; margin-top: 14px;
+  border-left: 2px solid var(--line);
+}
+.status {
+  padding: 14px; border-radius: var(--radius); font-size: 13.5px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--text-dim);
+  display: flex; gap: 10px; align-items: center;
+}
+.status.err { border-color: #5b2626; color: #fca5a5; background: rgba(248,113,113,.06); }
+.spin {
+  width: 14px; height: 14px; border: 2px solid var(--line);
+  border-top-color: var(--accent); border-radius: 50%; flex: none;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.bar { height: 2px; background: var(--line-soft); border-radius: 2px; overflow: hidden; margin-top: 10px; }
+.bar > i { display: block; height: 100%; background: var(--accent); transition: width .3s ease; }
+
+.toolbar {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  margin-bottom: 14px; font-size: 13px; color: var(--text-dim);
+}
+.toolbar label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.toolbar select {
+  background: var(--surface-2); color: var(--text); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); padding: 5px 8px; font: inherit; font-size: 13px;
+}
+
+dialog {
+  background: var(--surface); color: var(--text); border: 1px solid var(--line);
+  border-radius: var(--radius); max-width: 620px; width: calc(100% - 32px); padding: 22px;
+}
+dialog::backdrop { background: rgba(0,0,0,.65); }
+dialog h2 { font-size: 18px; margin-bottom: 12px; }
+dialog h3 { font-size: 13px; margin: 16px 0 6px; }
+dialog p, dialog li { font-size: 13.5px; color: var(--text-dim); }
+.dlg-close { position: absolute; top: 14px; right: 16px; background: none; border: 0; color: var(--text-mute); font-size: 20px; }
+
+footer { border-top: 1px solid var(--line-soft); padding: 20px 0 40px; font-size: 12.5px; color: var(--text-mute); }
+footer a { color: var(--text-dim); }
+
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+@media (max-width: 700px) {
+  .card-panel { grid-template-columns: 100px 1fr; gap: 14px; padding: 14px; }
+  .card-meta h2 { font-size: 18px; }
+  .result > summary { grid-template-columns: 1fr; }
+  .r-right { flex-direction: row; align-items: center; }
+  .brand small { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#results">Skip to results</a>
+
+<header class="top">
+  <div class="wrap">
+    <div class="top-row">
+      <div class="brand"><span class="mark" aria-hidden="true"></span>MTG Combo Explorer <small>verified + hypothesis</small></div>
+      <div class="top-actions">
+        <button class="ghost" id="btn-about" type="button">About</button>
+      </div>
+    </div>
+    <div class="search-shell">
+      <div class="search-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
+        </svg>
+        <input id="q" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"
+               placeholder="Search a Magic card…"
+               role="combobox" aria-expanded="false" aria-controls="suggest"
+               aria-autocomplete="list" aria-label="Search for a Magic: The Gathering card">
+        <button class="clear-btn" id="btn-clear" type="button" aria-label="Clear search" hidden>&times;</button>
+      </div>
+      <ul id="suggest" role="listbox" aria-label="Card suggestions" hidden></ul>
+    </div>
+  </div>
+</header>
+
+<main class="wrap" id="main">
+  <div id="card-panel" aria-live="polite"></div>
+  <div id="results"></div>
+</main>
+
+<footer class="wrap">
+  <p>
+    Verified combo data from <a href="https://commanderspellbook.com/" target="_blank" rel="noopener noreferrer">Commander Spellbook</a>.
+    Card data and images from <a href="https://scryfall.com/" target="_blank" rel="noopener noreferrer">Scryfall</a>.
+    Not affiliated with or endorsed by either project, or by Wizards of the Coast.
+  </p>
+  <p id="data-stamp"></p>
+</footer>
+
+<dialog id="about">
+  <button class="dlg-close" type="button" data-close aria-label="Close">&times;</button>
+  <h2>About this tool</h2>
+  <p>Two clearly separated layers of trust:</p>
+  <h3>Verified combos</h3>
+  <p>Sourced from Commander Spellbook's curated database. Card lists and produced results are shown here;
+     the written steps and prerequisites live on Commander Spellbook, and every result links straight to them.</p>
+  <h3>Combo hypotheses</h3>
+  <p>Generated locally by a deterministic rule engine that reads Oracle text. It checks a fixed list of
+     proof obligations per template and shows you exactly which ones it could and could not confirm.
+     A hypothesis is <strong>not</strong> a rules ruling, and "not found in Commander Spellbook" does not
+     mean nobody has discovered it. Verify anything you intend to play.</p>
+  <h3>Privacy</h3>
+  <p>No accounts, no cookies, no analytics, no API keys. Card lookups go directly from your browser to
+     Scryfall. Cached data stays in your browser.</p>
+  <p><button class="ghost" type="button" id="btn-clear-cache">Clear local cache</button></p>
+  <h3>Engine</h3>
+  <p id="about-engine"></p>
+</dialog>
+
+<script type="module">
+/* ==========================================================================
+   MTG Combo Explorer
+   Single-file static app. No build step, no backend, no API keys.
+
+   Section map:
+     1  Config + constants          8  Verified combo source (baked shards)
+     2  Small utilities             9  Oracle feature extraction
+     3  Safe DOM helpers           10  Rule template registry
+     4  Result / band vocabulary   11  Discovery engine
+     5  Request scheduler          12  App state store
+     6  Cache (IndexedDB + memory) 13  Rendering
+     7  Scryfall client            14  Controllers + bootstrap
+
+   Everything below the DOM layer is pure and exported on globalThis.MTG so the
+   Node test harness in tests/ can import this exact code without a browser.
+   ========================================================================== */
+
+/* -- 1. Config ----------------------------------------------------------- */
+
+const ENGINE_VERSION = '0.4.0';
+const DATA_DIR = 'data';
+
+const CFG = {
+  scryfall: 'https://api.scryfall.com',
+  // Scryfall asks for <10 req/s and rate-limits on bursts, not just averages.
+  // 150ms (~6.6/s) leaves real headroom, including for a second tab of ours.
+  scryfallSpacingMs: 150,
+  debounceMs: 150,
+  maxSuggestions: 10,
+  recentLimit: 8,
+  // Hard ceilings for one analysis run. The tool prefers "here are 8 solid
+  // leads" over freezing the browser chasing exhaustive coverage.
+  budget: { roleQueries: 8, candidates: 900, evaluations: 4000 },
+  // A single template must not be able to bury the others.
+  maxPerRule: 25,
+  ttl: {
+    autocomplete: 24 * 3600e3,
+    card: 7 * 24 * 3600e3,
+    roleCatalog: 7 * 24 * 3600e3,
+    shard: 7 * 24 * 3600e3,
+  },
+};
+
+const SPELLBOOK_COMBO_URL = 'https://commanderspellbook.com/combo/';
+const SPELLBOOK_SEARCH_URL = 'https://commanderspellbook.com/search/?q=';
+
+/* -- 2. Utilities -------------------------------------------------------- */
+
+/** Fold to a comparable key: NFKD, strip accents/punctuation, collapse space. */
+function normalizeName(s) {
+  return String(s ?? '')
+    // NFKD does not decompose ligatures, and Magic uses them in real card
+    // names (AEther Vial, AEther Hub). Without this they lose their first
+    // letter entirely when punctuation is stripped.
+    .replace(/\u00c6/g, 'Ae').replace(/\u00e6/g, 'ae')
+    .replace(/\u0152/g, 'Oe').replace(/\u0153/g, 'oe')
+    .replace(/\u00df/g, 'ss')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\u2019\u2018]/g, "'")
+    .replace(/[^a-zA-Z0-9'/, -]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeQuery(s) {
+  return String(s ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim();
+}
+
+/** Oracle text folded for pattern matching: reminder text out, dashes unified. */
+function normalizeOracle(s) {
+  return String(s ?? '')
+    .replace(/\([^)]*\)/g, ' ')      // reminder text is never rules-relevant here
+    .replace(/[\u2014\u2013]/g, '-')
+    .replace(/[\u2019\u2018]/g, "'")
+    .replace(/[ \t]+/g, ' ')
+    .toLowerCase();
+}
+
+const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+const uniqBy = (xs, k) => { const m = new Map(); for (const x of xs) if (!m.has(k(x))) m.set(k(x), x); return [...m.values()]; };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** FNV-1a. Must stay byte-identical to tools/bake-combos.mjs shardOf(). */
+function shardOf(oracleId, shards) {
+  let h = 2166136261;
+  for (let i = 0; i < oracleId.length; i++) {
+    h ^= oracleId.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) % shards;
+}
+
+/** Only ever hand an <img>/<a> a URL we recognise. */
+const ALLOWED_HOSTS = new Set(['api.scryfall.com', 'scryfall.com', 'cards.scryfall.io', 'commanderspellbook.com']);
+function safeUrl(raw) {
+  try {
+    const u = new URL(String(raw), location.href);
+    if (u.protocol !== 'https:' && u.origin !== location.origin) return null;
+    if (u.origin === location.origin) return u.href;
+    return ALLOWED_HOSTS.has(u.hostname) ? u.href : null;
+  } catch { return null; }
+}
+
+/* -- 3. Safe DOM --------------------------------------------------------- */
+
+/**
+ * Every string that reaches the DOM goes through here as a text node.
+ * There is no innerHTML path for API data anywhere in this file.
+ */
+function el(tag, props = {}, children = []) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (v == null || v === false) continue;
+    if (k === 'class') n.className = v;
+    else if (k === 'text') n.textContent = v;
+    else if (k === 'dataset') Object.assign(n.dataset, v);
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (k === 'href' || k === 'src') { const u = safeUrl(v); if (u) n.setAttribute(k, u); }
+    else if (v === true) n.setAttribute(k, '');
+    else n.setAttribute(k, String(v));
+  }
+  for (const c of [].concat(children)) if (c != null && c !== false) n.append(c);
+  return n;
+}
+
+function icon(path) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2.2');
+  svg.setAttribute('aria-hidden', 'true');
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  p.setAttribute('d', path);
+  svg.append(p);
+  return svg;
+}
+const ICON_SHIELD = 'M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z M9 12l2 2 4-4';
+const ICON_FLASK = 'M9 3h6M10 3v6L5 19a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-10V3';
+
+/** Highlight the matched span without ever parsing HTML. */
+function highlight(name, needle) {
+  const frag = document.createDocumentFragment();
+  const i = normalizeName(name).indexOf(normalizeName(needle));
+  if (!needle || i < 0) { frag.append(name); return frag; }
+  frag.append(name.slice(0, i));
+  frag.append(el('mark', { text: name.slice(i, i + needle.length) }));
+  frag.append(name.slice(i + needle.length));
+  return frag;
+}
+
+/* -- 4. Trust vocabulary ------------------------------------------------- */
+
+/**
+ * Confidence is NOT a number. Numeric scores in the 0-99 range imply a
+ * calibration this engine does not have. Instead each template lists explicit
+ * proof obligations; the band falls out of how many we could actually confirm.
+ */
+const OBLIG = { MET: 'met', UNKNOWN: 'unknown', UNMET: 'unmet' };
+
+const BAND = {
+  VERIFIED: { id: 'verified', label: 'Verified', cls: 'b-verified', rank: 0 },
+  HIGH:     { id: 'high',     label: 'Hypothesis · strong',  cls: 'b-high',   rank: 1 },
+  MEDIUM:   { id: 'medium',   label: 'Hypothesis · unproven',cls: 'b-medium', rank: 2 },
+  LEAD:     { id: 'lead',     label: 'Synergy lead',         cls: 'b-lead',   rank: 3 },
+  REJECT:   { id: 'reject',   label: 'Rejected',             cls: 'b-lead',   rank: 9 },
+};
+
+/**
+ * One unmet obligation kills the candidate outright — a broken proof step is a
+ * counterexample, not a discount. Unknowns only downgrade, because an unknown
+ * is a parser limitation rather than evidence against the loop.
+ */
+function bandFor(obligations, blockers, warnings = []) {
+  if (obligations.some((o) => o.state === OBLIG.UNMET)) return BAND.REJECT;
+  if (blockers.some((b) => b.fatal)) return BAND.REJECT;
+  const unknowns = obligations.filter((o) => o.state === OBLIG.UNKNOWN).length;
+  // If the parser flagged that it may have misread a card, the proof rests on
+  // a reading we do not trust. Transforming and modal cards land here, and
+  // promoting them to "strong" is how a plausible-looking engine loses the
+  // user's trust in one bad result.
+  const ceiling = warnings.length ? BAND.MEDIUM : BAND.HIGH;
+  if (unknowns === 0 && blockers.length === 0) return ceiling;
+  if (unknowns <= 1) return BAND.MEDIUM;
+  return BAND.LEAD;
+}
+
+/* -- 5. Request scheduler ------------------------------------------------ */
+
+/**
+ * One FIFO queue per host with a minimum gap between departures, plus
+ * backoff on 429/5xx. Everything network-bound in this app goes through it,
+ * which makes "are we being a good citizen" a single-place question.
+ */
+class Scheduler {
+  #queue = [];
+  #busy = false;
+  #last = 0;
+  #penalty = 0;
+
+  constructor(spacingMs) { this.spacing = spacingMs; }
+
+  run(fn) {
+    return new Promise((resolve, reject) => {
+      this.#queue.push({ fn, resolve, reject });
+      this.#pump();
+    });
+  }
+
+  async #pump() {
+    if (this.#busy) return;
+    this.#busy = true;
+    while (this.#queue.length) {
+      const job = this.#queue.shift();
+      const wait = this.spacing + this.#penalty - (Date.now() - this.#last);
+      if (wait > 0) await sleep(wait);
+      this.#last = Date.now();
+      try {
+        const out = await job.fn();
+        this.#penalty = Math.max(0, this.#penalty / 2 - 10);
+        job.resolve(out);
+      } catch (e) {
+        if (e?.status === 429 || (e?.status >= 500 && e?.status < 600)) {
+          this.#penalty = clamp(this.#penalty ? this.#penalty * 2 : 400, 400, 8000);
+        }
+        job.reject(e);
+      }
+    }
+    this.#busy = false;
+  }
+
+  get pressure() { return this.#penalty; }
+}
+
+class HttpError extends Error {
+  constructor(status, url, detail) {
+    super(detail || `HTTP ${status}`);
+    this.status = status; this.url = url;
+  }
+}
+
+/* -- 6. Cache ------------------------------------------------------------ */
+
+/**
+ * IndexedDB with a memory tier in front. Private-mode and quota failures
+ * degrade to memory-only rather than breaking the app, which is why every
+ * method swallows storage errors.
+ */
+class Cache {
+  #mem = new Map();
+  #db = null;
+  #ready = null;
+
+  #open() {
+    if (this.#ready) return this.#ready;
+    this.#ready = new Promise((resolve) => {
+      let req;
+      try { req = indexedDB.open('mtg-combo-explorer', 2); }
+      catch { return resolve(null); }
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+      setTimeout(() => resolve(null), 2000);  // never let storage stall a render
+    }).then((db) => (this.#db = db));
+    return this.#ready;
+  }
+
+  async get(key) {
+    const hit = this.#mem.get(key);
+    if (hit) return hit.exp > Date.now() ? hit.val : (this.#mem.delete(key), null);
+    const db = await this.#open();
+    if (!db) return null;
+    const rec = await new Promise((res) => {
+      try {
+        const r = db.transaction('kv', 'readonly').objectStore('kv').get(key);
+        r.onsuccess = () => res(r.result); r.onerror = () => res(null);
+      } catch { res(null); }
+    });
+    if (!rec || rec.exp <= Date.now()) return null;
+    this.#mem.set(key, rec);
+    return rec.val;
+  }
+
+  async set(key, val, ttl) {
+    const rec = { val, exp: Date.now() + ttl };
+    this.#mem.set(key, rec);
+    const db = await this.#open();
+    if (!db) return;
+    try { db.transaction('kv', 'readwrite').objectStore('kv').put(rec, key); } catch { /* quota */ }
+  }
+
+  async clear() {
+    this.#mem.clear();
+    const db = await this.#open();
+    if (db) try { db.transaction('kv', 'readwrite').objectStore('kv').clear(); } catch { /* ignore */ }
+    try { localStorage.removeItem('mtg.recent'); } catch { /* ignore */ }
+  }
+}
+
+/* -- 7. Scryfall client -------------------------------------------------- */
+
+const cache = new Cache();
+const scryQueue = new Scheduler(CFG.scryfallSpacingMs);
+
+async function getJson(url, { signal, scheduler = scryQueue } = {}) {
+  return scheduler.run(async () => {
+    const res = await fetch(url, { signal, headers: { Accept: 'application/json' } });
+    if (!res.ok) {
+      let detail = '';
+      try { detail = (await res.json())?.details ?? ''; } catch { /* non-JSON error */ }
+      throw new HttpError(res.status, url, detail);
+    }
+    return res.json();
+  });
+}
+
+/**
+ * Normalised card shape. Double-faced and split cards have no top-level
+ * oracle_text, so faces are flattened here once — every consumer downstream
+ * can then assume `oracleText` exists. This is the single most common source
+ * of parser crashes if you skip it.
+ */
+function toCard(raw) {
+  const faces = raw.card_faces?.length ? raw.card_faces : [raw];
+  return {
+    oracleId: raw.oracle_id ?? faces[0]?.oracle_id ?? '',
+    scryfallId: raw.id,
+    name: raw.name,
+    manaCost: raw.mana_cost || faces.map((f) => f.mana_cost).filter(Boolean).join(' // '),
+    manaValue: raw.cmc ?? 0,
+    typeLine: raw.type_line || faces.map((f) => f.type_line).filter(Boolean).join(' // '),
+    oracleText: faces.map((f) => f.oracle_text || '').filter(Boolean).join('\n//\n'),
+    faces: faces.map((f) => ({
+      name: f.name, typeLine: f.type_line || '', oracleText: f.oracle_text || '', manaCost: f.mana_cost || '',
+    })),
+    colors: raw.colors ?? [],
+    colorIdentity: raw.color_identity ?? [],
+    legalities: raw.legalities ?? {},
+    layout: raw.layout ?? 'normal',
+    image: raw.image_uris?.normal ?? faces[0]?.image_uris?.normal ?? null,
+    imageSmall: raw.image_uris?.small ?? faces[0]?.image_uris?.small ?? null,
+    scryfallUri: raw.scryfall_uri ?? null,
+    edhrecRank: raw.edhrec_rank ?? null,
+  };
+}
+
+const Scryfall = {
+  async autocomplete(q, signal) {
+    const key = `ac:${normalizeName(q)}`;
+    const hit = await cache.get(key);
+    if (hit) return hit;
+    const url = `${CFG.scryfall}/cards/autocomplete?q=${encodeURIComponent(q)}`;
+    const data = await getJson(url, { signal });
+    const names = data.data ?? [];
+    await cache.set(key, names, CFG.ttl.autocomplete);
+    return names;
+  },
+
+  async named(text, { fuzzy = true, signal } = {}) {
+    const key = `named:${normalizeName(text)}:${fuzzy ? 'f' : 'e'}`;
+    const hit = await cache.get(key);
+    if (hit) return hit;
+    const param = fuzzy ? 'fuzzy' : 'exact';
+    const url = `${CFG.scryfall}/cards/named?${param}=${encodeURIComponent(text)}`;
+    const card = toCard(await getJson(url, { signal }));
+    await cache.set(key, card, CFG.ttl.card);
+    await cache.set(`card:${card.oracleId}`, card, CFG.ttl.card);
+    return card;
+  },
+
+  async byOracleId(oracleId, signal) {
+    const hit = await cache.get(`card:${oracleId}`);
+    if (hit) return hit;
+    const url = `${CFG.scryfall}/cards/search?q=${encodeURIComponent(`oracleid:${oracleId}`)}&unique=cards`;
+    const data = await getJson(url, { signal });
+    if (!data.data?.length) throw new HttpError(404, url, 'No card for that oracle id');
+    const card = toCard(data.data[0]);
+    await cache.set(`card:${oracleId}`, card, CFG.ttl.card);
+    return card;
+  },
+
+  /**
+   * Paginated search with a hard page ceiling. Role catalogues are small by
+   * construction (see RULES) so this rarely goes past page one.
+   */
+  async search(query, { maxPages = 3, signal } = {}) {
+    const key = `search:${query}`;
+    const hit = await cache.get(key);
+    if (hit) return hit;
+
+    const out = [];
+    let url = `${CFG.scryfall}/cards/search?q=${encodeURIComponent(query)}&unique=cards&order=edhrec`;
+    for (let page = 0; page < maxPages && url; page++) {
+      let data;
+      try {
+        data = await getJson(url, { signal });
+      } catch (e) {
+        if (e.status === 404) break;   // Scryfall returns 404 for zero matches
+        throw e;
+      }
+      out.push(...(data.data ?? []).map(toCard));
+      url = data.has_more ? data.next_page : null;
+    }
+    await cache.set(key, out, CFG.ttl.roleCatalog);
+    return out;
+  },
+};
+
+/* -- 8. Verified combo source ------------------------------------------- */
+
+/**
+ * Commander Spellbook's REST backend does not send Access-Control-Allow-Origin
+ * to third-party origins, so a static page cannot call it from the browser
+ * (verified 2026-08-20; see docs/DATA.md). The verified layer is therefore a
+ * facts-only index baked offline by tools/bake-combos.mjs and served from our
+ * own origin as shards.
+ *
+ * The app is designed to run with the index absent: `available` goes false and
+ * the UI says the verified layer is offline instead of silently showing none.
+ */
+class VerifiedSource {
+  #meta = null;
+  #metaTried = false;
+  #shards = new Map();
+
+  async meta() {
+    if (this.#metaTried) return this.#meta;
+    this.#metaTried = true;
+    try {
+      const res = await fetch(`${DATA_DIR}/meta.json`, { headers: { Accept: 'application/json' } });
+      if (res.ok) this.#meta = await res.json();
+    } catch { /* index not deployed */ }
+    return this.#meta;
+  }
+
+  get available() { return !!this.#meta; }
+
+  async #shard(n) {
+    if (this.#shards.has(n)) return this.#shards.get(n);
+    const key = `shard:${n}:${this.#meta.generated}`;
+    let data = await cache.get(key);
+    if (!data) {
+      const res = await fetch(`${DATA_DIR}/shards/${n}.json`, { headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new HttpError(res.status, `shard ${n}`);
+      data = await res.json();
+      await cache.set(key, data, CFG.ttl.shard);
+    }
+    this.#shards.set(n, data);
+    return data;
+  }
+
+  /**
+   * Verified combos that use `oracleId`, decoded from the shard encoding.
+   * Returns null when no index is deployed, so callers can distinguish
+   * "no combos" from "no verified layer at all".
+   */
+  async combosFor(oracleId) {
+    const meta = await this.meta();
+    if (!meta) return null;
+    const shard = await this.#shard(shardOf(oracleId, meta.shards));
+    const entry = shard.entries[oracleId];
+    if (!entry) return { combos: [], total: 0 };
+    const [, total, rows] = entry;
+    // Rows carry only integers; card identity and feature labels live in the
+    // shard's string tables. See tools/bake-combos.mjs for the encoding.
+    const combos = rows.map(([id, cardIxs, featIxs, identity, popularity, legal]) => ({
+      id,
+      cards: cardIxs.map((i) => ({ oracleId: shard.cards[i][0], name: shard.cards[i][1] })),
+      produces: featIxs.map((i) => shard.feats[i]),
+      identity,
+      popularity,
+      commanderLegal: !!legal,
+      url: SPELLBOOK_COMBO_URL + encodeURIComponent(id),
+    }));
+    return { combos, total };
+  }
+
+  /**
+   * Membership test for the novelty check. Because we already hold every
+   * verified combo for the selected card, this is a local set lookup — the
+   * plan's original per-candidate API call is unnecessary and unaffordable.
+   */
+  static noveltyIndex(combos) {
+    const set = new Set();
+    for (const c of combos) {
+      const ids = c.cards.map((x) => x.oracleId).sort();
+      set.add(ids.join('|'));
+      // Also index every pair inside a larger combo: a 2-card hypothesis that
+      // is a strict subset of a known 3-card line is not a new discovery.
+      for (let i = 0; i < ids.length; i++)
+        for (let j = i + 1; j < ids.length; j++) set.add([ids[i], ids[j]].join('|'));
+    }
+    return set;
+  }
+}
+
+const verified = new VerifiedSource();
+
+/* -- 9. Oracle feature extraction ---------------------------------------- */
+
+/**
+ * Deliberately not a Comprehensive Rules parser. It recognises a small set of
+ * high-value patterns and, critically, records the exact phrase that fired each
+ * one. Anything it does not recognise becomes a warning, never a guess — an
+ * unrecognised clause downgrades confidence instead of being ignored.
+ */
+
+const NUM_WORD = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+const COLORS = ['w', 'u', 'b', 'r', 'g', 'c'];
+
+const emptyMana = () => ({ generic: 0, w: 0, u: 0, b: 0, r: 0, g: 0, c: 0, any: 0, x: false, hybrid: 0 });
+
+/** Sum the {…} symbols in a string into a mana vector. */
+function parseManaSymbols(text) {
+  const m = emptyMana();
+  for (const [, sym] of String(text).matchAll(/\{([^}]+)\}/g)) {
+    const s = sym.toLowerCase();
+    if (/^\d+$/.test(s)) m.generic += Number(s);
+    else if (s === 'x') m.x = true;
+    else if (COLORS.includes(s)) m[s] += 1;
+    else if (s.includes('/')) m.hybrid += 1;         // hybrid/phyrexian: payable, cost unclear
+  }
+  return m;
+}
+
+function manaTotal(m) { return m.generic + m.w + m.u + m.b + m.r + m.g + m.c + m.any + m.hybrid; }
+
+/** "Add {C}{C}{C}" / "Add three mana of any color" / "Add {G} for each …" */
+function parseManaProduction(clause) {
+  const out = emptyMana();
+  let found = false;
+  for (const [, body] of clause.matchAll(/\badd\b([^.;]*)/g)) {
+    // "of any color", "of that color", "in any combination of colors" - all
+    // mean untyped mana as far as the resource maths is concerned.
+    const any = body.match(/(\w+) mana (?:of (?:any|that) (?:one )?colors?|in any combination of colors)/);
+    if (any) {
+      const n = NUM_WORD[any[1]] ?? Number(any[1]);
+      out.any += Number.isFinite(n) ? n : 1;
+      found = true;
+    }
+    const syms = parseManaSymbols(body);
+    if (manaTotal(syms) > 0) { 
+      for (const k of ['generic', ...COLORS]) out[k] += syms[k];
+      found = true;
+    }
+    // Scaling production ("for each …") is unbounded-ish; flag rather than guess.
+    if (/for each\b/.test(body)) out.scales = true;
+  }
+  return found ? out : null;
+}
+
+const RESTRICTION_PATTERNS = [
+  [/activate (?:this ability )?only once each turn/, 'onceEachTurn', 'Activate only once each turn'],
+  [/only once each turn/, 'onceEachTurn', 'Once each turn'],
+  [/activate only as a sorcery/, 'sorceryOnly', 'Activate only as a sorcery'],
+  [/activate only during (?:your|the)/, 'timing', 'Timing-restricted activation'],
+  [/only if you (?:have|control)/, 'conditional', 'Conditional activation'],
+  [/this ability triggers only once each turn/, 'onceEachTurn', 'Triggers only once each turn'],
+];
+
+/** Split one ability line into cost and effect around the first top-level colon. */
+function splitActivated(line) {
+  let depth = 0;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') depth--;
+    else if (ch === ':' && depth === 0) {
+      const cost = line.slice(0, i).trim();
+      // A colon inside prose ("choose one:") is not an activation cost.
+      // Must be case-insensitive: costs are capitalised at the start of a line,
+      // so a case-sensitive test silently demotes most sacrifice outlets
+      // ("Sacrifice a creature: Add {C}{C}") to plain static text.
+      if (!/[{}]|sacrifice|discard|pay|exile|tap|remove|return/i.test(cost)) return null;
+      return { cost, effect: line.slice(i + 1).trim() };
+    }
+  }
+  return null;
+}
+
+function parseCost(costText) {
+  const t = costText.toLowerCase();
+  const mana = parseManaSymbols(costText.replace(/\{t\}|\{q\}|\{e\}/gi, ''));
+  return {
+    text: costText,
+    mana,
+    manaTotal: manaTotal(mana),
+    tap: /\{t\}/i.test(costText),
+    untapSymbol: /\{q\}/i.test(costText),
+    sacrificeSelf: /sacrifice (this|~|it\b)/.test(t) || /sacrifice (this creature|this artifact|this permanent|this enchantment|this land)/.test(t),
+    sacrificeOther: /sacrifice (a|an|another|two|three|\d)/.test(t),
+    exileSelf: /exile (this|~)/.test(t),
+    discard: /discard/.test(t),
+    life: /pay \d+ life|pay [a-z]+ life/.test(t),
+    removeCounter: /remove (a|an|one|two|\d+|[a-z]+) .*counter/.test(t),
+    tapOther: /tap (an?|two|three|\d+|another) (?:untapped )?/.test(t) && !/\{t\}/i.test(costText),
+  };
+}
+
+/** Effects we can reason about. Everything else lands in `raw`. */
+function parseEffects(effectText) {
+  const t = normalizeOracle(effectText);
+  const fx = [];
+  const add = (op, extra = {}) => fx.push({ op, evidence: effectText.trim().slice(0, 160), ...extra });
+
+  const mana = parseManaProduction(t);
+  if (mana) add('addMana', { mana, amount: manaTotal(mana) });
+
+  if (/\buntap\b/.test(t)) {
+    // Auras and Equipment say "untap enchanted creature" rather than "untap
+    // target creature". Requiring the word "target" here quietly excludes the
+    // whole Aura family, which is the most common two-card untap engine there
+    // is (Freed from the Real, Pemmin's Aura).
+    const m = t.match(/untap (?:(?:up to \w+ )?(?:another )?target |enchanted |equipped )?([a-z][a-z ]*?)(?:\.|,|$| you control| that)/);
+    const self = /untap (this|it\b|~)/.test(t);
+    add('untap', {
+      self,
+      targets: !self && /\b(target|enchanted|equipped)\b/.test(t),
+      subject: (m?.[1] || '').trim() || (self ? 'self' : 'permanent'),
+    });
+  }
+  if (/\breturn\b.*\bto (its owner's|their owner's|your) hand\b/.test(t)) add('bounce', { self: /return (this|it\b|~)/.test(t) });
+  if (/\bexile\b.*\breturn\b/.test(t) || /\bexile\b.*\bthen return\b/.test(t)) add('blink', {});
+  if (/\breturn\b.*\bfrom your graveyard\b/.test(t)) add('recur', { toBattlefield: /to the battlefield/.test(t) });
+  if (/\bcreate\b.*\btoken/.test(t)) add('token', {});
+  if (/\bdeals? \d+ damage|deals? [a-z]+ damage|deals damage/.test(t)) add('damage', {});
+  if (/\bdraws? (a card|\w+ cards)/.test(t)) add('draw', {});
+  // "loses that much life" and "gains that much life" are the common wordings;
+  // a one-word-before-"life" pattern misses both.
+  if (/\b(gain|gains)\b[^.;]*\blife\b/.test(t)) add('gainLife', {});
+  if (/\b(lose|loses)\b[^.;]*\blife\b/.test(t)) add('loseLife', {});
+  if (/\bcopy (target|that)\b/.test(t)) add('copyAbility', { spell: /spell/.test(t) });
+  if (/\bmills?\b/.test(t)) add('mill', {});
+  if (/\byou win the game\b|\bloses the game\b/.test(t)) add('win', {});
+  if (/\bput\b.*\bcounter/.test(t)) add('putCounter', {});
+  if (/\buntap all\b/.test(t)) add('untapAll', {});
+  if (/\btake an extra turn\b|\badditional combat phase\b/.test(t)) add('extraAction', {});
+
+  return fx;
+}
+
+const TRIGGER_RE = /^(whenever|when|at the beginning of|at end of)\b/;
+
+/**
+ * Full extraction for one card. Returns a FeatureSet with per-ability detail,
+ * derived role tags, and the warnings that keep confidence honest.
+ */
+function extractFeatures(card) {
+  const warnings = [];
+  const abilities = [];
+  const typeLine = (card.typeLine || '').toLowerCase();
+  const types = new Set(typeLine.replace(/[—–-]/g, ' ').split(/\s+/).filter(Boolean));
+
+  const lines = String(card.oracleText || '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && l !== '//');
+
+  for (const line of lines) {
+    const norm = normalizeOracle(line);
+    const restrictions = {};
+    const restrictionNotes = [];
+    for (const [re, key, label] of RESTRICTION_PATTERNS) {
+      if (re.test(norm)) { restrictions[key] = true; restrictionNotes.push(label); }
+    }
+
+    const split = splitActivated(line);
+    if (split) {
+      abilities.push({
+        kind: 'activated',
+        text: line,
+        cost: parseCost(split.cost),
+        effects: parseEffects(split.effect),
+        restrictions, restrictionNotes,
+      });
+      continue;
+    }
+    if (TRIGGER_RE.test(norm)) {
+      const body = line.replace(/^[^,]*,\s*/, '');
+      abilities.push({
+        kind: 'triggered',
+        text: line,
+        trigger: norm.match(/^(?:whenever|when|at the beginning of|at end of)\s+([^,]*)/)?.[1] ?? '',
+        cost: parseCost(''),
+        effects: parseEffects(body),
+        restrictions, restrictionNotes,
+      });
+      continue;
+    }
+    abilities.push({ kind: 'static', text: line, cost: parseCost(''), effects: parseEffects(line), restrictions, restrictionNotes });
+  }
+
+  const f = {
+    name: card.name,
+    oracleId: card.oracleId,
+    typeLine: card.typeLine,
+    types,
+    manaValue: card.manaValue,
+    colorIdentity: card.colorIdentity ?? [],
+    legalities: card.legalities ?? {},
+    oracleText: card.oracleText ?? '',
+    normText: normalizeOracle(card.oracleText ?? ''),
+    abilities,
+    warnings,
+    card,
+  };
+
+  f.doesNotUntap = /doesn't untap during your untap step/.test(f.normText);
+  f.hasHaste = /\bhaste\b/.test(f.normText);
+  f.roles = detectRoles(f);
+
+  if (!lines.length) warnings.push('This card has no Oracle text to analyse.');
+  if (/\bchoose one\b|\bmodes?\b/.test(f.normText)) warnings.push('Modal ability: only one mode applies per activation.');
+  if (card.layout && !['normal', 'split', 'flip', 'leveler', 'saga', 'class', 'case'].includes(card.layout))
+    warnings.push(`Layout "${card.layout}" — faces are analysed together, which may overstate what is available at once.`);
+
+  return f;
+}
+
+/* -- Role registry ------------------------------------------------------- */
+
+/**
+ * A role is a mechanical job a card can do in a loop. Roles are the interface
+ * between the parser and the rule templates, and each one owns the Scryfall
+ * query that enumerates its candidates.
+ *
+ * The query is a coarse net cast ONCE per role and cached for a week; `detect`
+ * is the fine filter applied locally. This is the key scaling property: the
+ * catalogue is per-role, not per-searched-card, so analysing a new card
+ * normally costs zero network requests.
+ */
+const ROLES = {
+  mana_ability: {
+    label: 'Taps for mana',
+    detect: (f) => f.abilities.some((a) => a.kind === 'activated' && a.cost.tap && a.effects.some((e) => e.op === 'addMana')),
+  },
+  self_untap_payer: {
+    label: 'Can untap itself for mana',
+    detect: (f) => f.abilities.some((a) => a.kind === 'activated' && a.cost.manaTotal > 0 && a.effects.some((e) => e.op === 'untap' && e.self)),
+  },
+  untapper: {
+    label: 'Untaps another permanent',
+    query: '(oracle:/untap target (artifact|permanent|creature|land)/ or oracle:"untap enchanted creature" or oracle:"untap enchanted permanent" or oracle:"untap enchanted artifact" or oracle:"untap equipped creature") -is:funny game:paper',
+    detect: (f) => f.abilities.some((a) => a.effects.some((e) => e.op === 'untap' && !e.self && e.targets)),
+  },
+  ability_copier: {
+    label: 'Copies activated abilities',
+    query: '(oracle:"copy target activated" or oracle:"copy that ability" or oracle:"copy it" oracle:"activated ability") -is:funny game:paper',
+    detect: (f) => /copy (target|that) (activated )?ability|copy that ability/.test(f.normText),
+  },
+  sac_outlet: {
+    label: 'Repeatable sacrifice outlet',
+    query: 'oracle:/sacrifice (a|another) (creature|permanent|artifact)/ (oracle:/:/ or oracle:"whenever") -is:funny game:paper',
+    detect: (f) => f.abilities.some((a) => a.kind === 'activated' && a.cost.sacrificeOther && !a.restrictions.onceEachTurn),
+  },
+  blinker: {
+    label: 'Blinks a permanent',
+    query: '(oracle:/exile target (creature|permanent|artifact)/ oracle:/return (it|that card)/) -is:funny game:paper',
+    detect: (f) => f.abilities.some((a) => a.effects.some((e) => e.op === 'blink')),
+  },
+  bouncer: {
+    label: 'Returns a permanent to hand',
+    query: 'oracle:/return target (nonland )?(permanent|creature|artifact) you control to its owner/ -is:funny game:paper',
+    detect: (f) => f.abilities.some((a) => a.effects.some((e) => e.op === 'bounce' && !e.self)),
+  },
+  lifegain_trigger: {
+    label: 'Triggers on life gain',
+    query: 'oracle:"whenever you gain life" -is:funny game:paper',
+    detect: (f) => f.abilities.some((a) => a.kind === 'triggered' && /you gain life/.test(a.trigger)),
+  },
+  lifeloss_payoff: {
+    label: 'Converts life loss or damage into gain',
+    query: '(oracle:"whenever you lose life" or oracle:"whenever an opponent loses life" or oracle:"whenever a player loses life" or oracle:"loses that much life") -is:funny game:paper',
+    detect: (f) => f.abilities.some((a) => a.kind === 'triggered' && /(you|an opponent|a player|another player|each opponent)\b[^,]*\bloses? life/.test(a.trigger)),
+  },
+  etb_payoff: {
+    label: 'Enters-the-battlefield payoff',
+    detect: (f) => f.abilities.some((a) => a.kind === 'triggered' && /enters/.test(a.trigger)),
+  },
+  self_recursion: {
+    label: 'Returns itself from the graveyard',
+    detect: (f) => /return (this|~|it) .*from your graveyard|returns? (this|~) to the battlefield/.test(f.normText),
+  },
+};
+
+function detectRoles(f) {
+  const out = new Set();
+  for (const [id, role] of Object.entries(ROLES)) {
+    try { if (role.detect(f)) out.add(id); } catch { /* defensive: a role must never break extraction */ }
+  }
+  return out;
+}
+
+/* -- 10. Rule template registry ------------------------------------------ */
+
+/**
+ * Each template is a named, independently testable proof function.
+ *
+ * A template declares which role the selected card must fill ("engine") and
+ * which role its partner must fill. Whichever side is cheap to enumerate on
+ * Scryfall carries the query; the engine runs whichever direction is available.
+ *
+ * evaluate() returns proof OBLIGATIONS, not a score. Each obligation is a
+ * claim the loop depends on, marked met / unknown / unmet with the Oracle
+ * phrase that decided it. The UI shows this list verbatim, so a user can audit
+ * the reasoning instead of trusting a number.
+ */
+
+const ob = (id, label, state, evidence) => ({ id, label, state, evidence: evidence || '' });
+
+/** Find the activated ability that best fits a predicate, cheapest first. */
+function findAbility(f, pred) {
+  return f.abilities.filter(pred).sort((a, b) => a.cost.manaTotal - b.cost.manaTotal)[0] ?? null;
+}
+
+/**
+ * Mana embedded in a "you may pay {2}" clause. Triggered abilities carry no
+ * activation cost, but their body can still demand payment - Rings of
+ * Brighthearth is the canonical case, and missing it overstates the profit of
+ * every copy loop.
+ */
+function payCostIn(text) {
+  const m = normalizeOracle(text).match(/\bpay\b((?:\s*\{[^}]+\})+)/);
+  return m ? manaTotal(parseManaSymbols(m[1])) : 0;
+}
+
+/** Does an untap effect's stated subject cover this card's types? */
+function untapCovers(effect, targetTypes) {
+  const s = (effect.subject || '').toLowerCase();
+  if (/permanent/.test(s)) return 'met';
+  for (const t of ['artifact', 'creature', 'land', 'enchantment']) {
+    if (s.includes(t)) return targetTypes.has(t) ? 'met' : 'unmet';
+  }
+  return 'unknown';
+}
+
+/**
+ * Is this effect actually repeatable within one turn?
+ *
+ * The single most important precision check in the engine. An instant or
+ * sorcery does its thing once and goes to the graveyard, so it can enable a
+ * loop but can never BE one. Without this, every blink template happily
+ * proposes Cloudshift and Ephemerate against every creature with an ETB
+ * trigger, which is a flood of confident nonsense.
+ */
+function repeatabilityOb(f, ability, { triggerSelfSustaining = false } = {}) {
+  const who = f.name;
+  const label = `${who} can do this over and over`;
+  if (f.types.has('instant') || f.types.has('sorcery'))
+    return ob('repeat', label, OBLIG.UNMET, `${f.typeLine} — resolves once, then it is gone`);
+  if (!ability) return ob('repeat', label, OBLIG.UNKNOWN, '');
+  if (ability.restrictions.onceEachTurn)
+    return ob('repeat', label, OBLIG.UNMET, ability.restrictionNotes.join('; '));
+  if (ability.cost.exileSelf)
+    return ob('repeat', label, OBLIG.UNMET, 'Exiles itself as a cost');
+  if (ability.cost.sacrificeSelf)
+    return ob('repeat', label, OBLIG.UNMET, 'Sacrifices itself as a cost');
+  if (ability.kind === 'static' && !f.types.has('enchantment'))
+    return ob('repeat', label, OBLIG.UNKNOWN, 'Could not tell whether this effect can be reused');
+  // A triggered enabler only fires when its condition recurs, which the loop
+  // itself may or may not cause. A template that knows its own cycle re-causes
+  // the trigger says so explicitly; otherwise we admit we cannot tell.
+  if (ability.kind === 'triggered')
+    return triggerSelfSustaining
+      ? ob('repeat', label, OBLIG.MET, `The loop re-causes this trigger every cycle: "${(ability.trigger || ability.text).slice(0, 90)}"`)
+      : ob('repeat', label, OBLIG.UNKNOWN, `Depends on repeating the trigger: "${(ability.trigger || ability.text).slice(0, 90)}"`);
+  if (ability.restrictions.sorceryOnly)
+    return ob('repeat', label, OBLIG.UNKNOWN, 'Sorcery-speed only: the loop still works, but only on your turn');
+  return ob('repeat', label, OBLIG.MET, ability.text.slice(0, 120));
+}
+
+/** Summoning sickness only matters when a creature must tap. */
+function hasteOb(f, ability) {
+  if (!ability?.cost.tap) return null;
+  if (!f.types.has('creature')) return null;
+  if (f.hasHaste) return ob('haste', `${f.name} can tap immediately`, OBLIG.MET, 'Has haste');
+  return ob('haste', `${f.name} can tap immediately`, OBLIG.UNKNOWN,
+    'Creature without haste: the loop needs it to have been on the battlefield since your turn began');
+}
+
+const RULES = [
+  {
+    id: 'R01',
+    name: 'Mana-positive untap loop',
+    summary: 'One card taps for mana; the other untaps it for less than it produced.',
+    engineRole: 'mana_ability',
+    partnerRole: 'untapper',
+    partnerQuery: ROLES.untapper.query,
+
+    evaluate(e, p) {
+      const tapAb = findAbility(e, (a) => a.kind === 'activated' && a.cost.tap && a.effects.some((x) => x.op === 'addMana'));
+      const untapAb = findAbility(p, (a) => a.effects.some((x) => x.op === 'untap' && !x.self && x.targets));
+      if (!tapAb || !untapAb) return null;
+
+      const produced = tapAb.effects.find((x) => x.op === 'addMana');
+      const gain = produced.amount + (produced.mana.any || 0);
+      const spend = untapAb.cost.manaTotal;
+      const net = gain - spend;
+      const untapFx = untapAb.effects.find((x) => x.op === 'untap' && !x.self);
+
+      const obligations = [
+        ob('produces', `${e.name} produces mana when tapped`, OBLIG.MET, tapAb.text.slice(0, 120)),
+        ob('covers', `${p.name} can untap ${e.name}`, untapCovers(untapFx, e.types), untapFx.evidence),
+        ob('positive', `Each cycle nets more mana than it costs (+${net})`,
+          produced.mana.x || produced.mana.scales ? OBLIG.UNKNOWN : net > 0 ? OBLIG.MET : OBLIG.UNMET,
+          `Produces ${gain}, untap costs ${spend}`),
+        repeatabilityOb(p, untapAb),
+      ];
+
+      // The cycle must restore EVERY reusable permanent it consumes, not just
+      // the mana rock. An untapper that taps itself as a cost (Clock of Omens,
+      // Aphetto Alchemist) is spent after one use, so the loop does not close
+      // on these two cards alone. Skipping this check is what makes a naive
+      // untap template propose scores of pairs that stop after one activation.
+      const untapperRestores =
+        !untapAb.cost.tap ? OBLIG.MET
+        : untapAb.effects.some((x) => x.op === 'untap' && x.self) || /untap all/.test(p.normText) ? OBLIG.MET
+        : OBLIG.UNMET;
+      obligations.push(ob('untapperReady', `${p.name} is untapped again for the next cycle`, untapperRestores,
+        untapAb.cost.tap
+          ? `${p.name} taps as part of its cost and nothing here untaps it`
+          : 'Its cost does not tap it, so it stays available'));
+
+      const haste = hasteOb(p, untapAb);
+      if (haste) obligations.push(haste);
+      if (untapAb.cost.tapOther)
+        obligations.push(ob('fuel', `${p.name}'s cost needs no extra permanents`, OBLIG.UNKNOWN,
+          'Requires tapping other permanents you control'));
+
+      const blockers = [];
+      if (e.doesNotUntap)
+        blockers.push({ text: `${e.name} does not untap during your untap step, so the loop is its only untapper.`, fatal: false });
+      if (produced.mana.any === 0 && spend > 0 && manaTotal(produced.mana) === produced.mana.c && untapAb.cost.mana.generic < spend)
+        blockers.push({ text: 'Check that colourless production can pay the coloured part of the untap cost.', fatal: false });
+
+      return {
+        obligations, blockers,
+        outputs: net > 0 ? ['Repeatable mana', `+${net} per cycle`] : ['Repeatable untap'],
+        sequence: [
+          `Tap ${e.name} for mana (${gain}).`,
+          `Activate ${p.name} to untap ${e.name}${spend ? ` for ${spend}` : ''}.`,
+          `Net ${net > 0 ? '+' : ''}${net} mana. Repeat.`,
+        ],
+      };
+    },
+  },
+
+  {
+    id: 'R02',
+    name: 'Copied untap activation',
+    summary: 'A card that untaps itself for mana, plus something that copies the activation.',
+    engineRole: 'self_untap_payer',
+    partnerRole: 'ability_copier',
+    partnerQuery: ROLES.ability_copier.query,
+
+    evaluate(e, p) {
+      const tapAb = findAbility(e, (a) => a.kind === 'activated' && a.cost.tap && a.effects.some((x) => x.op === 'addMana'));
+      const untapAb = findAbility(e, (a) => a.kind === 'activated' && a.effects.some((x) => x.op === 'untap' && x.self));
+      if (!tapAb || !untapAb) return null;
+
+      const copyAb = findAbility(p, (a) => a.effects.some((x) => x.op === 'copyAbility')) ??
+                     p.abilities.find((a) => /copy/.test(normalizeOracle(a.text)));
+      const produced = tapAb.effects.find((x) => x.op === 'addMana');
+      const gain = produced.amount + (produced.mana.any || 0);
+      const untapCost = untapAb.cost.manaTotal;
+      // Activated copiers put the cost before the colon; triggered ones bury it
+      // in a "you may pay {N}" clause.
+      const copyCost = (copyAb?.cost.manaTotal || 0) + (copyAb ? payCostIn(copyAb.text) : 0);
+
+      // The copy is what makes this profitable. Activating the untap once puts
+      // two untap resolutions on the stack, and you tap for mana in between
+      // them, so a single cycle taps the engine TWICE while paying for one
+      // untap plus one copy. Getting this wrong (counting a single tap) makes
+      // the engine reject Basalt Monolith + Rings of Brighthearth, which is a
+      // long-established combo.
+      const gainPerCycle = gain * 2;
+      const net = gainPerCycle - untapCost - copyCost;
+
+      const obligations = [
+        ob('self', `${e.name} untaps itself for mana`, OBLIG.MET, untapAb.text.slice(0, 120)),
+        ob('copyable', `${p.name} copies an activated ability`, copyAb ? OBLIG.MET : OBLIG.UNKNOWN, copyAb?.text.slice(0, 120) ?? ''),
+        ob('positive', `Two taps per cycle beat the untap plus copy cost (+${net})`,
+          produced.mana.x ? OBLIG.UNKNOWN : net > 0 ? OBLIG.MET : OBLIG.UNMET,
+          `Taps twice for ${gainPerCycle}, untap costs ${untapCost}, copy costs ${copyCost}`),
+        ob('notmana', 'The ability being copied is not a mana ability',
+          untapAb.effects.some((x) => x.op === 'addMana') ? OBLIG.UNMET : OBLIG.MET,
+          'Mana abilities do not use the stack, so copy effects like this cannot target them. The untap ability adds no mana, so it is copyable.'),
+        repeatabilityOb(p, copyAb, { triggerSelfSustaining: /whenever you activate/.test(p.normText) }),
+      ];
+
+      return {
+        obligations,
+        blockers: [],
+        outputs: net > 0 ? ['Repeatable mana', `+${net} per cycle`] : ['Extra activations'],
+        sequence: [
+          `Tap ${e.name} for ${gain} mana.`,
+          `Activate ${e.name}'s untap ability for ${untapCost}.`,
+          `${p.name} triggers — pay ${copyCost} to copy the untap ability.`,
+          `The copy resolves and untaps ${e.name}. Tap it again for ${gain}.`,
+          `The original untap resolves, untapping it once more. Net ${net > 0 ? '+' : ''}${net} mana. Repeat.`,
+        ],
+      };
+    },
+  },
+];
+
+RULES.push(
+  {
+    id: 'R03',
+    name: 'Self-funding blink loop',
+    summary: 'A permanent whose enter-the-battlefield trigger pays for the effect that blinks it.',
+    engineRole: 'etb_payoff',
+    partnerRole: 'blinker',
+    partnerQuery: ROLES.blinker.query,
+
+    evaluate(e, p) {
+      const etb = e.abilities.find((a) => a.kind === 'triggered' && /enters/.test(a.trigger) && a.effects.length);
+      const blinkAb = findAbility(p, (a) => a.effects.some((x) => x.op === 'blink'));
+      if (!etb || !blinkAb) return null;
+
+      const mana = etb.effects.find((x) => x.op === 'addMana');
+      const gain = mana ? mana.amount + (mana.mana.any || 0) : 0;
+      const cost = blinkAb.cost.manaTotal;
+      const payoff = etb.effects.filter((x) => x !== mana).map((x) => x.op);
+
+      const obligations = [
+        ob('etb', `${e.name} does something when it enters`, OBLIG.MET, etb.text.slice(0, 120)),
+        ob('blink', `${p.name} can exile and return ${e.name}`, OBLIG.MET, blinkAb.effects.find((x) => x.op === 'blink').evidence),
+        // The template's whole claim is "self-funding". Either the trigger pays
+        // for the blink, or the blink is free. A 2-mana blink of a creature
+        // that makes no mana is a fine value play but it is not a loop, and
+        // saying otherwise is how this template floods the UI.
+        ob('funds', mana ? `The trigger pays for the blink (+${gain - cost})` : 'The blink costs nothing to repeat',
+          mana ? (gain - cost > 0 ? OBLIG.MET : OBLIG.UNMET) : (cost === 0 ? OBLIG.MET : OBLIG.UNMET),
+          mana ? `ETB adds ${gain}, blink costs ${cost}` : `Blink costs ${cost}; the trigger produces ${payoff.join(', ') || 'no mana'}`),
+        ob('returns', 'The exiled card comes back the same turn',
+          /return (it|that card|them) to the battlefield/.test(normalizeOracle(blinkAb.text)) ? OBLIG.MET : OBLIG.UNKNOWN,
+          blinkAb.text.slice(0, 140)),
+        repeatabilityOb(p, blinkAb),
+      ];
+
+      const blockers = [];
+      if (/at the beginning of (the next|your) end step/.test(normalizeOracle(blinkAb.text)))
+        blockers.push({ text: 'This is tied to the end step, so it repeats once per turn rather than without bound.', fatal: true });
+      if (/another target/.test(normalizeOracle(blinkAb.text)) && p.oracleId === e.oracleId)
+        blockers.push({ text: '"Another target" prevents self-targeting.', fatal: true });
+
+      return {
+        obligations, blockers,
+        outputs: ['Repeatable enter-the-battlefield trigger', ...payoff.slice(0, 3)],
+        sequence: [
+          `${e.name} is on the battlefield.`,
+          `Activate ${p.name} to exile and return ${e.name}${cost ? ` for ${cost}` : ''}.`,
+          `Its enter trigger resolves again${gain ? `, adding ${gain} mana` : ''}. Repeat.`,
+        ],
+      };
+    },
+  },
+
+  {
+    id: 'R04',
+    name: 'Reciprocal life feedback',
+    summary: 'One card turns life gain into life loss or damage; the other turns that back into life gain.',
+    engineRole: 'lifegain_trigger',
+    partnerRole: 'lifeloss_payoff',
+    partnerQuery: ROLES.lifeloss_payoff.query,
+
+    evaluate(e, p) {
+      const gainTrig = e.abilities.find((a) => a.kind === 'triggered' && /you gain life/.test(a.trigger));
+      const lossTrig = p.abilities.find((a) => a.kind === 'triggered' && /loses? life/.test(a.trigger));
+      if (!gainTrig || !lossTrig) return null;
+
+      const causesLoss = gainTrig.effects.some((x) => x.op === 'loseLife' || x.op === 'damage');
+      const causesGain = lossTrig.effects.some((x) => x.op === 'gainLife');
+
+      const obligations = [
+        ob('a2b', `${e.name} converts life gain into loss or damage`, causesLoss ? OBLIG.MET : OBLIG.UNMET, gainTrig.text.slice(0, 140)),
+        ob('b2a', `${p.name} converts that loss back into life gain`, causesGain ? OBLIG.MET : OBLIG.UNMET, lossTrig.text.slice(0, 140)),
+        ob('direction', 'The loss lands on an opponent, not only on you',
+          /opponent|each other player|target player/.test(normalizeOracle(gainTrig.text)) ? OBLIG.MET : OBLIG.UNKNOWN,
+          gainTrig.text.slice(0, 140)),
+        ob('mandatory', 'Both triggers are mandatory',
+          /\bmay\b/.test(normalizeOracle(gainTrig.text + lossTrig.text)) ? OBLIG.UNKNOWN : OBLIG.MET,
+          'An optional trigger can be declined, which is fine, but it also means the loop is not forced'),
+      ];
+
+      return {
+        obligations,
+        blockers: [{ text: 'Needs one initial point of life gain to start the loop.', fatal: false }],
+        outputs: ['Unbounded life loss', 'Unbounded life gain'],
+        sequence: [
+          'Gain life once from any source.',
+          `${e.name} converts the gain into loss or damage.`,
+          `${p.name} converts that back into life gain. Repeat.`,
+        ],
+      };
+    },
+  },
+
+  {
+    id: 'R05',
+    name: 'Sacrifice and self-recursion',
+    summary: 'A permanent that returns itself from the graveyard, plus a free sacrifice outlet.',
+    engineRole: 'self_recursion',
+    partnerRole: 'sac_outlet',
+    partnerQuery: ROLES.sac_outlet.query,
+
+    evaluate(e, p) {
+      const outlet = findAbility(p, (a) => a.kind === 'activated' && a.cost.sacrificeOther);
+      if (!outlet) return null;
+      const recurLine = e.abilities.find((a) => /from your graveyard|to the battlefield/.test(normalizeOracle(a.text)));
+
+      const cost = outlet.cost.manaTotal;
+      const payoff = outlet.effects.map((x) => x.op).filter((o) => o !== 'untap');
+
+      const obligations = [
+        ob('recur', `${e.name} returns itself`, recurLine ? OBLIG.MET : OBLIG.UNKNOWN, recurLine?.text.slice(0, 140) ?? ''),
+        ob('outlet', `${p.name} can sacrifice it repeatedly`, OBLIG.MET, outlet.text.slice(0, 140)),
+        ob('free', 'The sacrifice outlet is free to use', cost === 0 ? OBLIG.MET : OBLIG.UNMET, `Outlet costs ${cost} mana`),
+        ob('nontoken', 'The recursion is not blocked by a nontoken clause',
+          /nontoken/.test(e.normText) ? OBLIG.UNKNOWN : OBLIG.MET, ''),
+        ob('cost', 'Returning it does not need a fresh resource each time',
+          /pay|sacrifice|discard|exile/.test(normalizeOracle(recurLine?.text ?? '')) ? OBLIG.UNKNOWN : OBLIG.MET,
+          recurLine?.text.slice(0, 140) ?? ''),
+        repeatabilityOb(p, outlet),
+      ];
+
+      return {
+        obligations,
+        blockers: [],
+        outputs: ['Repeatable death trigger', ...payoff.slice(0, 3)],
+        sequence: [
+          `Sacrifice ${e.name} to ${p.name}.`,
+          `${e.name} returns itself to the battlefield.`,
+          'Repeat for unbounded death and enter triggers.',
+        ],
+      };
+    },
+  },
+
+  {
+    id: 'R06',
+    name: 'Bounce and recast loop',
+    summary: 'A permanent whose enter trigger produces at least as much mana as recasting it costs.',
+    engineRole: 'etb_payoff',
+    partnerRole: 'bouncer',
+    partnerQuery: ROLES.bouncer.query,
+
+    evaluate(e, p) {
+      const etb = e.abilities.find((a) => a.kind === 'triggered' && /enters/.test(a.trigger));
+      const bounceAb = findAbility(p, (a) => a.effects.some((x) => x.op === 'bounce' && !x.self));
+      if (!etb || !bounceAb) return null;
+
+      const mana = etb.effects.find((x) => x.op === 'addMana');
+      const gain = mana ? mana.amount + (mana.mana.any || 0) : 0;
+      const recast = e.manaValue + bounceAb.cost.manaTotal;
+      const net = gain - recast;
+
+      const obligations = [
+        ob('etb', `${e.name} triggers on entering`, OBLIG.MET, etb.text.slice(0, 120)),
+        ob('bounce', `${p.name} returns ${e.name} to your hand`, OBLIG.MET, bounceAb.effects.find((x) => x.op === 'bounce').evidence),
+        ob('funds', `Recasting is fully paid for (+${net})`,
+          !mana ? OBLIG.UNMET : net >= 0 ? OBLIG.MET : OBLIG.UNMET,
+          `ETB adds ${gain}; recast ${e.manaValue} + bounce ${bounceAb.cost.manaTotal} = ${recast}`),
+        ob('colors', 'Produced colours can pay the recast cost',
+          mana && (mana.mana.any > 0 || mana.mana.generic > 0) ? OBLIG.UNKNOWN : OBLIG.UNKNOWN,
+          'Check that the mana produced matches the coloured pips in the recast cost'),
+        repeatabilityOb(p, bounceAb),
+      ];
+
+      return {
+        obligations,
+        blockers: [{ text: 'Recasting uses the stack and can be responded to.', fatal: false }],
+        outputs: ['Repeatable cast trigger', 'Repeatable enter trigger', net > 0 ? `+${net} mana per cycle` : 'Mana neutral'],
+        sequence: [
+          `Activate ${p.name} to return ${e.name} to your hand.`,
+          `Recast ${e.name} for ${e.manaValue}.`,
+          `Its enter trigger adds ${gain} mana. Net ${net >= 0 ? '+' : ''}${net}. Repeat.`,
+        ],
+      };
+    },
+  },
+);
+
+/* -- 11. Discovery engine ------------------------------------------------ */
+
+/**
+ * Budget object shared across one analysis run. Every network fetch and every
+ * pair evaluation decrements it, so the worst case is bounded no matter how
+ * many templates match.
+ */
+class Budget {
+  constructor(b) { this.queries = b.roleQueries; this.candidates = b.candidates; this.evals = b.evaluations; }
+  takeQuery() { return this.queries-- > 0; }
+  takeEvals(n) { const ok = this.evals > 0; this.evals -= n; return ok; }
+  get spent() { return this.queries <= 0 || this.evals <= 0; }
+}
+
+/**
+ * Fetch (and cache) the candidate catalogue for one role.
+ * Catalogues are keyed by role, not by the selected card, so the second card a
+ * user looks at usually costs no requests at all.
+ */
+async function roleCatalog(roleId, query, budget, signal) {
+  const key = `role:${roleId}:${ENGINE_VERSION}`;
+  const hit = await cache.get(key);
+  if (hit) return hit;
+  if (!budget.takeQuery()) return [];
+  const cards = await Scryfall.search(query, { maxPages: 2, signal });
+  await cache.set(key, cards, CFG.ttl.roleCatalog);
+  return cards;
+}
+
+/**
+ * Run every applicable template against the selected card.
+ *
+ * `onBatch` is called after each template so results paint progressively
+ * rather than after the slowest query.
+ */
+async function discover(card, { onBatch, onProgress, signal, novelty } = {}) {
+  const selected = extractFeatures(card);
+  const budget = new Budget(CFG.budget);
+  const seen = new Set();
+  const all = [];
+
+  const applicable = RULES.filter((r) => selected.roles.has(r.engineRole));
+  onProgress?.({ done: 0, total: applicable.length, selected });
+
+  for (const [i, rule] of applicable.entries()) {
+    if (signal?.aborted) break;
+    let pool = [];
+    try {
+      pool = await roleCatalog(rule.partnerRole, rule.partnerQuery, budget, signal);
+    } catch (e) {
+      if (e.name === 'AbortError') break;
+      onProgress?.({ done: i + 1, total: applicable.length, error: rule.id });
+      continue;
+    }
+
+    const batch = [];
+    for (const partnerCard of pool.slice(0, CFG.budget.candidates)) {
+      if (partnerCard.oracleId === card.oracleId) continue;
+      if (!budget.takeEvals(1)) break;
+
+      const partner = extractFeatures(partnerCard);
+      // The Scryfall query is a coarse net; confirm the role locally.
+      if (!ROLES[rule.partnerRole].detect(partner)) continue;
+
+      let proof;
+      try { proof = rule.evaluate(selected, partner); }
+      catch { continue; }                    // a broken template must not break the run
+      if (!proof) continue;
+
+      const warnings = [...selected.warnings, ...partner.warnings];
+      const band = bandFor(proof.obligations, proof.blockers, warnings);
+      if (band === BAND.REJECT || band === BAND.LEAD) continue;
+
+      const pairKey = [card.oracleId, partner.oracleId].sort().join('|');
+      if (seen.has(pairKey)) continue;
+      seen.add(pairKey);
+
+      batch.push({
+        kind: 'hypothesis',
+        ruleId: rule.id,
+        ruleName: rule.name,
+        ruleSummary: rule.summary,
+        band,
+        cards: [
+          { oracleId: card.oracleId, name: card.name, image: card.imageSmall },
+          { oracleId: partner.oracleId, name: partner.name, image: partnerCard.imageSmall },
+        ],
+        obligations: proof.obligations,
+        blockers: proof.blockers,
+        outputs: proof.outputs,
+        sequence: proof.sequence,
+        warnings,
+        knownAlready: novelty?.has(pairKey) ?? false,
+        colorOk: colorFits(selected, partner),
+        commanderLegal: partnerCard.legalities?.commander === 'legal',
+        edhrecRank: partnerCard.edhrecRank,
+      });
+    }
+
+    batch.sort(compareCandidates);
+    const capped = batch.slice(0, CFG.maxPerRule);
+    all.push(...capped);
+    onBatch?.(capped, { done: i + 1, total: applicable.length, ruleName: rule.name });
+  }
+
+  return { selected, candidates: all.sort(compareCandidates), budget };
+}
+
+/** Two cards fit in one Commander deck if their identities union to <=5 pips. */
+function colorFits(a, b) {
+  return new Set([...(a.colorIdentity ?? []), ...(b.colorIdentity ?? [])]).size <= 5;
+}
+
+function compareCandidates(a, b) {
+  if (a.band.rank !== b.band.rank) return a.band.rank - b.band.rank;
+  if (a.knownAlready !== b.knownAlready) return a.knownAlready ? 1 : -1;
+  const ar = a.edhrecRank ?? 1e9, br = b.edhrecRank ?? 1e9;
+  if (ar !== br) return ar - br;
+  return a.cards[1].name.localeCompare(b.cards[1].name);
+}
+
+/* -- 12. State ----------------------------------------------------------- */
+
+const state = {
+  phase: 'idle',            // idle | resolving | ready | error
+  card: null,
+  features: null,
+  verified: null,           // null = not loaded, [] = none found
+  verifiedTotal: 0,
+  verifiedState: 'idle',    // idle | loading | ready | error | unavailable
+  candidates: [],
+  discoveryState: 'idle',   // idle | loading | partial | ready | error | none
+  progress: { done: 0, total: 0 },
+  tab: 'verified',
+  filters: { commanderOnly: false, hideKnown: false },
+  error: null,
+  suggestions: [],
+  activeSuggestion: -1,
+};
+
+const listeners = new Set();
+function setState(patch) { Object.assign(state, patch); listeners.forEach((fn) => fn(state)); }
+
+function recentSearches(add) {
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem('mtg.recent') ?? '[]'); } catch { /* corrupt */ }
+  if (add) {
+    list = [add, ...list.filter((x) => x.name !== add.name)].slice(0, CFG.recentLimit);
+    try { localStorage.setItem('mtg.recent', JSON.stringify(list)); } catch { /* full */ }
+  }
+  return list;
+}
+
+/* -- 13. Rendering ------------------------------------------------------- */
+
+const $ = (sel) => document.querySelector(sel);
+
+// Resolved in mount(), not at module scope: the Node test harness imports this
+// same script with no DOM present.
+let panelEl, resultsEl, inputEl, suggestEl, clearBtn;
+function bindDom() {
+  panelEl = $('#card-panel');
+  resultsEl = $('#results');
+  inputEl = $('#q');
+  suggestEl = $('#suggest');
+  clearBtn = $('#btn-clear');
+}
+
+function renderCardPanel() {
+  panelEl.replaceChildren();
+  if (state.phase === 'idle') return;
+
+  if (state.phase === 'resolving') {
+    panelEl.append(el('div', { class: 'status' }, [el('span', { class: 'spin' }), 'Resolving card…']));
+    return;
+  }
+  if (state.phase === 'error') {
+    panelEl.append(el('div', { class: 'status err' }, [state.error ?? 'Something went wrong.']));
+    return;
+  }
+
+  const c = state.card;
+  const f = state.features;
+  const roles = [...(f?.roles ?? [])].filter((r) => ROLES[r]?.label);
+
+  panelEl.append(el('section', { class: 'card-panel' }, [
+    c.image
+      ? el('img', { class: 'card-art', src: c.image, alt: `${c.name} card image`, loading: 'lazy', decoding: 'async' })
+      : el('div', { class: 'card-art' }),
+    el('div', { class: 'card-meta' }, [
+      el('h2', { text: c.name }),
+      el('div', { class: 'mana', text: c.manaCost || '—' }),
+      el('div', { class: 'type-line', text: c.typeLine }),
+      c.oracleText ? el('div', { class: 'oracle', text: c.oracleText }) : null,
+      roles.length
+        ? el('div', { class: 'roles' }, [
+            el('span', { class: 'sr', text: 'Mechanical roles detected: ' }),
+            ...roles.map((r) => el('span', { class: 'role', text: ROLES[r].label })),
+          ])
+        : null,
+      el('div', { class: 'meta-links' }, [
+        c.scryfallUri ? el('a', { href: c.scryfallUri, target: '_blank', rel: 'noopener noreferrer', text: 'View on Scryfall ↗' }) : null,
+        el('a', {
+          href: SPELLBOOK_SEARCH_URL + encodeURIComponent(`card:"${c.name}"`),
+          target: '_blank', rel: 'noopener noreferrer', text: 'Search Commander Spellbook ↗',
+        }),
+      ]),
+    ]),
+  ]));
+}
+
+function badge(band) {
+  return el('span', { class: `badge ${band.cls}` }, [
+    icon(band === BAND.VERIFIED ? ICON_SHIELD : ICON_FLASK),
+    band.label,
+  ]);
+}
+
+function cardNames(cards) {
+  const frag = document.createDocumentFragment();
+  cards.forEach((c, i) => {
+    if (i) frag.append(el('span', { class: 'plus', text: '+' }));
+    frag.append(document.createTextNode(c.name));
+  });
+  return frag;
+}
+
+function renderVerifiedItem(combo) {
+  const others = combo.cards.filter((c) => c.oracleId !== state.card.oracleId);
+  return el('details', { class: 'result' }, [
+    el('summary', {}, [
+      el('div', {}, [
+        el('div', { class: 'r-cards' }, [cardNames(combo.cards)]),
+        el('div', { class: 'r-out', text: combo.produces.join(' · ') || 'See source for results' }),
+      ]),
+      el('div', { class: 'r-right' }, [
+        badge(BAND.VERIFIED),
+        el('span', { class: 'r-out', text: `${combo.cards.length} cards` }),
+      ]),
+    ]),
+    el('div', { class: 'r-body' }, [
+      el('div', { class: 'r-sec' }, [
+        el('h4', { text: 'Produces' }),
+        el('ul', {}, combo.produces.length
+          ? combo.produces.map((p) => el('li', { text: p }))
+          : [el('li', { text: 'Not recorded in the index.' })]),
+      ]),
+      el('div', { class: 'r-sec' }, [
+        el('h4', { text: 'Other cards' }),
+        el('ul', {}, others.length ? others.map((c) => el('li', { text: c.name })) : [el('li', { text: '—' })]),
+      ]),
+      el('div', { class: 'r-sec' }, [
+        el('h4', { text: 'Details' }),
+        el('ul', {}, [
+          el('li', { text: `Colour identity: ${combo.identity || 'colourless'}` }),
+          el('li', { text: `Commander legal: ${combo.commanderLegal ? 'yes' : 'no'}` }),
+        ]),
+      ]),
+      el('p', { class: 'note' }, [
+        'Step-by-step instructions and prerequisites live on Commander Spellbook. ',
+        el('a', { href: combo.url, target: '_blank', rel: 'noopener noreferrer', text: 'Open this combo ↗' }),
+      ]),
+    ]),
+  ]);
+}
+
+function renderObligations(obligations) {
+  const mark = { met: '✓', unknown: '?', unmet: '✕' };
+  return el('ul', { class: 'oblig' }, obligations.map((o) => el('li', {}, [
+    el('span', { class: `st st-${o.state}`, text: mark[o.state] }),
+    el('span', {}, [
+      el('span', { text: o.label }),
+      el('span', { class: 'sr', text: ` — ${o.state}` }),
+      o.evidence ? el('span', { class: 'ev', text: o.evidence }) : null,
+    ]),
+  ])));
+}
+
+function renderCandidate(cand) {
+  const partner = cand.cards[1];
+  return el('details', { class: 'result' }, [
+    el('summary', {}, [
+      el('div', {}, [
+        el('div', { class: 'r-cards' }, [cardNames(cand.cards)]),
+        el('div', { class: 'r-out', text: `${cand.ruleName} · ${cand.outputs.join(' · ')}` }),
+      ]),
+      el('div', { class: 'r-right' }, [
+        badge(cand.band),
+        cand.knownAlready ? el('span', { class: 'badge b-verified' }, [icon(ICON_SHIELD), 'Already known']) : null,
+      ]),
+    ]),
+    el('div', { class: 'r-body' }, [
+      el('div', { class: 'partner-row' }, [
+        partner.image ? el('img', { src: partner.image, alt: `${partner.name} card image`, loading: 'lazy' }) : null,
+        el('div', {}, [
+          el('div', { text: partner.name }),
+          el('a', {
+            href: `https://scryfall.com/search?q=${encodeURIComponent(`!"${partner.name}"`)}`,
+            target: '_blank', rel: 'noopener noreferrer', text: 'View on Scryfall ↗',
+          }),
+        ]),
+      ]),
+      el('div', { class: 'r-sec' }, [
+        el('h4', { text: `How it is supposed to loop — ${cand.ruleId}` }),
+        el('ul', {}, cand.sequence.map((s) => el('li', { text: s }))),
+      ]),
+      el('div', { class: 'r-sec' }, [
+        el('h4', { text: 'What the engine checked' }),
+        renderObligations(cand.obligations),
+      ]),
+      cand.blockers.length
+        ? el('div', { class: 'r-sec' }, [
+            el('h4', { text: 'Watch out for' }),
+            el('ul', {}, cand.blockers.map((b) => el('li', { text: b.text }))),
+          ])
+        : null,
+      cand.warnings.length
+        ? el('div', { class: 'r-sec' }, [
+            el('h4', { text: 'Parser warnings' }),
+            el('ul', {}, uniqBy(cand.warnings.map((w) => ({ w })), (x) => x.w).map((x) => el('li', { text: x.w }))),
+          ])
+        : null,
+      el('p', { class: 'note' }, [
+        cand.knownAlready
+          ? 'This pair already appears in the verified index, so the engine reproduced a known interaction rather than proposing a new one.'
+          : 'Not found in the verified index. That means it was not in the Commander Spellbook data this build was made from — not that it is undiscovered. Confirm the rules before playing it.',
+        ' ',
+        el('a', {
+          href: SPELLBOOK_SEARCH_URL + encodeURIComponent(`card:"${state.card.name}" card:"${partner.name}"`),
+          target: '_blank', rel: 'noopener noreferrer', text: 'Check Commander Spellbook ↗',
+        }),
+      ]),
+    ]),
+  ]);
+}
+
+function visibleCandidates() {
+  return state.candidates.filter((c) => {
+    if (state.filters.commanderOnly && !c.commanderLegal) return false;
+    if (state.filters.hideKnown && c.knownAlready) return false;
+    return true;
+  });
+}
+
+function renderResults() {
+  resultsEl.replaceChildren();
+  if (state.phase !== 'ready') {
+    if (state.phase === 'idle') resultsEl.append(renderLanding());
+    return;
+  }
+
+  const nVerified = state.verified?.length ?? 0;
+  const nCand = visibleCandidates().length;
+
+  const tabs = el('div', { class: 'tabs', role: 'tablist' }, [
+    tabButton('verified', 'Verified combos', nVerified),
+    tabButton('hypothesis', 'Hypotheses', nCand),
+  ]);
+  resultsEl.append(tabs);
+
+  const panel = el('div', {
+    role: 'tabpanel', id: `panel-${state.tab}`,
+    'aria-labelledby': `tab-${state.tab}`, tabindex: '0',
+  });
+  panel.append(state.tab === 'verified' ? verifiedPanel() : hypothesisPanel());
+  resultsEl.append(panel);
+}
+
+function tabButton(id, label, count) {
+  return el('button', {
+    class: 'tab', type: 'button', role: 'tab', id: `tab-${id}`,
+    'aria-selected': String(state.tab === id),
+    'aria-controls': `panel-${id}`,
+    tabindex: state.tab === id ? '0' : '-1',
+    onclick: () => setState({ tab: id }),
+    onkeydown: (ev) => {
+      if (ev.key !== 'ArrowRight' && ev.key !== 'ArrowLeft') return;
+      ev.preventDefault();
+      setState({ tab: state.tab === 'verified' ? 'hypothesis' : 'verified' });
+      document.getElementById(`tab-${state.tab}`)?.focus();
+    },
+  }, [label, el('span', { class: 'n', text: String(count) })]);
+}
+
+function verifiedPanel() {
+  const frag = document.createDocumentFragment();
+  if (state.verifiedState === 'loading') {
+    frag.append(el('div', { class: 'status' }, [el('span', { class: 'spin' }), 'Loading verified combos…']));
+    return frag;
+  }
+  if (state.verifiedState === 'unavailable') {
+    frag.append(el('div', { class: 'status' }, [
+      'The verified combo index is not deployed with this build, so only hypotheses are available. ',
+      el('a', {
+        href: SPELLBOOK_SEARCH_URL + encodeURIComponent(`card:"${state.card.name}"`),
+        target: '_blank', rel: 'noopener noreferrer', text: 'Search Commander Spellbook directly ↗',
+      }),
+    ]));
+    return frag;
+  }
+  if (state.verifiedState === 'error') {
+    frag.append(el('div', { class: 'status err' }, ['Could not load the verified combo index.']));
+    return frag;
+  }
+  if (!state.verified?.length) {
+    frag.append(el('div', { class: 'status' }, [`No verified combos indexed for ${state.card.name}.`]));
+    return frag;
+  }
+  if (state.verifiedTotal > state.verified.length) {
+    frag.append(el('p', { class: 'note' }, [
+      `Showing the ${state.verified.length} most popular of ${state.verifiedTotal} verified combos. `,
+      el('a', {
+        href: SPELLBOOK_SEARCH_URL + encodeURIComponent(`card:"${state.card.name}"`),
+        target: '_blank', rel: 'noopener noreferrer', text: 'See all on Commander Spellbook ↗',
+      }),
+    ]));
+  }
+  for (const combo of state.verified) frag.append(renderVerifiedItem(combo));
+  return frag;
+}
+
+function hypothesisPanel() {
+  const frag = document.createDocumentFragment();
+
+  frag.append(el('div', { class: 'toolbar' }, [
+    el('label', {}, [
+      el('input', {
+        type: 'checkbox', checked: state.filters.commanderOnly,
+        onchange: (e) => setState({ filters: { ...state.filters, commanderOnly: e.target.checked } }),
+      }),
+      'Commander legal only',
+    ]),
+    el('label', {}, [
+      el('input', {
+        type: 'checkbox', checked: state.filters.hideKnown,
+        onchange: (e) => setState({ filters: { ...state.filters, hideKnown: e.target.checked } }),
+      }),
+      'Hide already-known pairs',
+    ]),
+  ]));
+
+  if (state.discoveryState === 'loading' || state.discoveryState === 'partial') {
+    const { done, total } = state.progress;
+    frag.append(el('div', { class: 'status' }, [
+      el('span', { class: 'spin' }),
+      el('div', { style: 'flex:1' }, [
+        el('div', { text: `Testing rule templates… ${done} of ${total}` }),
+        el('div', { class: 'bar' }, [el('i', { style: `width:${total ? (done / total) * 100 : 0}%` })]),
+      ]),
+    ]));
+  }
+
+  if (state.discoveryState === 'none') {
+    frag.append(el('div', { class: 'status' }, [
+      `No rule template applies to ${state.card.name}. The engine only proposes loops it can actually reason about, so it stays quiet rather than guessing.`,
+    ]));
+    return frag;
+  }
+  if (state.discoveryState === 'error') {
+    frag.append(el('div', { class: 'status err' }, ['Candidate search failed. Partial results may be shown.']));
+  }
+
+  const list = visibleCandidates();
+  if (!list.length && state.discoveryState === 'ready') {
+    frag.append(el('div', { class: 'status' }, ['No hypothesis passed the proof checks. That is the engine working as intended — it rejects more than it shows.']));
+    return frag;
+  }
+  for (const c of list) frag.append(renderCandidate(c));
+
+  if (list.length) {
+    frag.append(el('p', { class: 'note', text:
+      'Hypotheses are produced by matching Oracle text against a small set of loop templates. They are not rules rulings, and the engine only understands the patterns it was taught.' }));
+  }
+  return frag;
+}
+
+function renderLanding() {
+  const recents = recentSearches();
+  const examples = ['Basalt Monolith', 'Dockside Extortionist', 'Kiki-Jiki, Mirror Breaker', 'Thassa’s Oracle', 'Peregrine Drake'];
+  return el('div', { class: 'empty' }, [
+    el('h2', { text: 'Look up any Magic card' }),
+    el('p', { text: 'See the combos it is already known to be part of, and the loops a deterministic rule engine thinks it could form. Verified facts and machine guesses are kept strictly apart.' }),
+    el('div', { class: 'chips' }, (recents.length ? recents.map((r) => r.name) : examples)
+      .map((name) => el('button', { class: 'chip', type: 'button', text: name, onclick: () => selectByName(name) }))),
+  ]);
+}
+
+/* -- 14. Controllers ----------------------------------------------------- */
+
+let acAbort = null;
+let discoverAbort = null;
+let debounceTimer = null;
+
+function renderSuggestions() {
+  suggestEl.replaceChildren();
+  const items = state.suggestions;
+  if (!items.length) {
+    suggestEl.hidden = true;
+    inputEl.setAttribute('aria-expanded', 'false');
+    inputEl.removeAttribute('aria-activedescendant');
+    return;
+  }
+  const q = inputEl.value.trim();
+  items.forEach((name, i) => {
+    const active = i === state.activeSuggestion;
+    suggestEl.append(el('li', {
+      role: 'option', id: `sug-${i}`, 'aria-selected': String(active),
+      onmousedown: (ev) => { ev.preventDefault(); selectByName(name); },
+      onmouseenter: () => { state.activeSuggestion = i; renderSuggestions(); },
+    }, [highlight(name, q)]));
+  });
+  suggestEl.hidden = false;
+  inputEl.setAttribute('aria-expanded', 'true');
+  if (state.activeSuggestion >= 0) inputEl.setAttribute('aria-activedescendant', `sug-${state.activeSuggestion}`);
+  else inputEl.removeAttribute('aria-activedescendant');
+}
+
+function closeSuggestions() {
+  state.suggestions = [];
+  state.activeSuggestion = -1;
+  renderSuggestions();
+}
+
+/** Local re-rank of Scryfall's bounded list. We order, we never filter. */
+function rankSuggestions(q, names) {
+  const nq = normalizeName(q);
+  return names
+    .map((name) => {
+      const nn = normalizeName(name);
+      let score = 4;
+      if (nn === nq) score = 0;
+      else if (nn.startsWith(nq)) score = 1;
+      else if (nn.split(' ').some((w) => w.startsWith(nq))) score = 2;
+      else if (nn.includes(nq)) score = 3;
+      return { name, score, len: name.length };
+    })
+    .sort((a, b) => a.score - b.score || a.len - b.len || a.name.localeCompare(b.name))
+    .slice(0, CFG.maxSuggestions)
+    .map((x) => x.name);
+}
+
+async function onInput() {
+  const raw = inputEl.value;
+  clearBtn.hidden = !raw;
+  clearTimeout(debounceTimer);
+  acAbort?.abort();
+
+  const q = normalizeQuery(raw);
+  if (q.length < 2) { closeSuggestions(); return; }
+
+  debounceTimer = setTimeout(async () => {
+    acAbort = new AbortController();
+    try {
+      const names = await Scryfall.autocomplete(q, acAbort.signal);
+      // Guard against an out-of-order response for an older prefix.
+      if (normalizeQuery(inputEl.value) !== q) return;
+      state.suggestions = rankSuggestions(q, names);
+      state.activeSuggestion = -1;
+      renderSuggestions();
+    } catch (e) {
+      if (e.name !== 'AbortError') closeSuggestions();
+    }
+  }, CFG.debounceMs);
+}
+
+function onKeyDown(ev) {
+  const n = state.suggestions.length;
+  if (ev.key === 'ArrowDown' && n) {
+    ev.preventDefault();
+    state.activeSuggestion = (state.activeSuggestion + 1) % n;
+    renderSuggestions();
+  } else if (ev.key === 'ArrowUp' && n) {
+    ev.preventDefault();
+    state.activeSuggestion = (state.activeSuggestion - 1 + n) % n;
+    renderSuggestions();
+  } else if (ev.key === 'Enter') {
+    ev.preventDefault();
+    const picked = state.activeSuggestion >= 0 ? state.suggestions[state.activeSuggestion] : null;
+    if (picked) selectByName(picked);                                  // exact: came from Scryfall
+    else if (inputEl.value.trim()) selectByName(inputEl.value.trim(), { fuzzy: true });
+  } else if (ev.key === 'Escape') {
+    closeSuggestions();
+  }
+}
+
+async function selectByName(text, { fuzzy = false, push = true } = {}) {
+  closeSuggestions();
+  clearTimeout(debounceTimer);
+  acAbort?.abort();
+  discoverAbort?.abort();
+  inputEl.value = text;
+  clearBtn.hidden = false;
+
+  setState({ phase: 'resolving', card: null, features: null, verified: null, verifiedTotal: 0,
+             verifiedState: 'idle', candidates: [], discoveryState: 'idle', error: null });
+
+  let card;
+  try {
+    card = await Scryfall.named(text, { fuzzy });
+  } catch (e) {
+    // An exact lookup can miss on punctuation the user (or a saved link) typed
+    // differently, so fall back to fuzzy once before giving up.
+    if (!fuzzy && e.status === 404) {
+      try { card = await Scryfall.named(text, { fuzzy: true }); } catch { /* fall through */ }
+    }
+    if (!card) {
+      setState({ phase: 'error', error: e.status === 404
+        ? `No card matched “${text}”. Try a different spelling.`
+        : `Could not reach Scryfall (${e.message}).` });
+      return;
+    }
+  }
+
+  inputEl.value = card.name;
+  recentSearches({ name: card.name, oracleId: card.oracleId });
+  if (push) {
+    const url = new URL(location.href);
+    url.searchParams.set('card', card.name);
+    history.pushState({ card: card.name }, '', url);
+  }
+  document.title = `${card.name} — MTG Combo Explorer`;
+
+  setState({ phase: 'ready', card, features: extractFeatures(card), tab: 'verified' });
+
+  loadVerified(card);
+}
+
+async function loadVerified(card) {
+  setState({ verifiedState: 'loading' });
+  let combos = null;
+  try {
+    combos = await verified.combosFor(card.oracleId);
+  } catch {
+    setState({ verifiedState: 'error' });
+    runDiscovery(card, new Set());
+    return;
+  }
+  if (combos === null) {
+    setState({ verifiedState: 'unavailable', tab: 'hypothesis' });
+    runDiscovery(card, new Set());
+    return;
+  }
+  setState({
+    verified: combos.combos,
+    verifiedTotal: combos.total,
+    verifiedState: 'ready',
+    tab: combos.combos.length ? 'verified' : 'hypothesis',
+  });
+  runDiscovery(card, VerifiedSource.noveltyIndex(combos.combos));
+}
+
+async function runDiscovery(card, novelty) {
+  discoverAbort = new AbortController();
+  setState({ discoveryState: 'loading', candidates: [], progress: { done: 0, total: 0 } });
+  try {
+    const { candidates } = await discover(card, {
+      signal: discoverAbort.signal,
+      novelty,
+      onProgress: (p) => setState({ progress: { done: p.done ?? 0, total: p.total ?? 0 } }),
+      onBatch: (batch, p) => {
+        state.candidates.push(...batch);
+        state.candidates.sort(compareCandidates);
+        setState({ discoveryState: 'partial', progress: { done: p.done, total: p.total } });
+      },
+    });
+    setState({
+      candidates: candidates,
+      discoveryState: state.progress.total === 0 ? 'none' : 'ready',
+    });
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    setState({ discoveryState: 'error' });
+  }
+}
+
+/* -- Bootstrap ----------------------------------------------------------- */
+
+function mount() {
+  bindDom();
+  listeners.add(() => { renderCardPanel(); renderResults(); });
+
+  inputEl.addEventListener('input', onInput);
+  inputEl.addEventListener('keydown', onKeyDown);
+  inputEl.addEventListener('focus', () => { if (!inputEl.value.trim()) showRecents(); });
+  document.addEventListener('click', (ev) => {
+    if (!suggestEl.contains(ev.target) && ev.target !== inputEl) closeSuggestions();
+  });
+  clearBtn.addEventListener('click', () => {
+    inputEl.value = ''; clearBtn.hidden = true; closeSuggestions(); inputEl.focus();
+    history.pushState({}, '', location.pathname);
+    document.title = 'MTG Combo Explorer';
+    setState({ phase: 'idle', card: null, candidates: [], verified: null });
+  });
+
+  const dlg = $('#about');
+  $('#btn-about').addEventListener('click', () => dlg.showModal());
+  dlg.querySelector('[data-close]').addEventListener('click', () => dlg.close());
+  $('#btn-clear-cache').addEventListener('click', async (ev) => {
+    await cache.clear();
+    ev.target.textContent = 'Cache cleared';
+  });
+  $('#about-engine').textContent =
+    `Rule engine v${ENGINE_VERSION} · ${RULES.length} templates · ${Object.keys(ROLES).length} roles.`;
+
+  window.addEventListener('popstate', () => {
+    const name = new URLSearchParams(location.search).get('card');
+    if (name) selectByName(name, { push: false });
+    else setState({ phase: 'idle', card: null });
+  });
+
+  verified.meta().then((meta) => {
+    if (!meta) return;
+    $('#data-stamp').textContent =
+      `Verified index: ${meta.combosKept.toLocaleString()} combos across ${meta.cardsIndexed.toLocaleString()} cards, baked ${meta.generated.slice(0, 10)}.`;
+  });
+
+  const initial = new URLSearchParams(location.search).get('card');
+  if (initial) selectByName(initial, { push: false });
+  else setState({ phase: 'idle' });
+}
+
+function showRecents() {
+  const recents = recentSearches();
+  if (!recents.length) return;
+  state.suggestions = recents.map((r) => r.name);
+  state.activeSuggestion = -1;
+  renderSuggestions();
+}
+
+/* Exported for the Node test harness in tests/. Keeping this the ONLY global
+   means the browser bundle and the tested code are byte-identical. */
+globalThis.MTG = {
+  ENGINE_VERSION, CFG, RULES, ROLES, BAND, OBLIG,
+  discover, Scryfall, roleCatalog, payCostIn, findAbility, Budget,
+  normalizeName, normalizeQuery, normalizeOracle, shardOf, safeUrl,
+  parseManaSymbols, parseManaProduction, parseCost, parseEffects, splitActivated,
+  extractFeatures, detectRoles, bandFor, rankSuggestions, toCard,
+  colorFits, compareCandidates, VerifiedSource, Scheduler, manaTotal,
+};
+
+if (typeof document !== 'undefined' && document.getElementById('q')) mount();
+</script>
+</body>
+</html>
