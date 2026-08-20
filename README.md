@@ -55,6 +55,14 @@ counterexample, not a discount. Unknowns only downgrade. A parser warning caps
 confidence below "strong", because a proof resting on a reading we admit we
 distrust should not look confident.
 
+**The default view only shows what the engine actually proved.** Fully proven
+hypotheses (`Hypothesis · strong`, zero open obligations) show by default.
+Hypotheses with an open question mark (`Hypothesis · unproven`) are hidden
+behind a "Show unproven leads" toggle in the Hypotheses tab — off by default —
+so the app never presents a guess as a suggestion. With the toggle off and no
+strong hypothesis for a card, the app says so and points at the verified
+combos instead of filling the gap with a lead.
+
 ## Layout
 
 ```
