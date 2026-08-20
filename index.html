@@ -1683,7 +1683,11 @@ const state = {
   discoveryState: 'idle',   // idle | loading | partial | ready | error | none
   progress: { done: 0, total: 0 },
   tab: 'verified',
-  filters: { commanderOnly: false, hideKnown: false },
+  // onlyProven defaults to true: the engine stays reserved by default and
+  // shows only fully-proven hypotheses (BAND.HIGH), leaning on the verified
+  // layer otherwise. Unproven leads (BAND.MEDIUM) are opt-in, not a default
+  // suggestion — see README "Why it is built this way".
+  filters: { commanderOnly: false, hideKnown: false, onlyProven: true },
   error: null,
   suggestions: [],
   activeSuggestion: -1,
@@ -1887,6 +1891,7 @@ function renderCandidate(cand) {
 
 function visibleCandidates() {
   return state.candidates.filter((c) => {
+    if (state.filters.onlyProven && c.band !== BAND.HIGH) return false;
     if (state.filters.commanderOnly && !c.commanderLegal) return false;
     if (state.filters.hideKnown && c.knownAlready) return false;
     return true;
@@ -1976,6 +1981,13 @@ function hypothesisPanel() {
   frag.append(el('div', { class: 'toolbar' }, [
     el('label', {}, [
       el('input', {
+        type: 'checkbox', checked: !state.filters.onlyProven,
+        onchange: (e) => setState({ filters: { ...state.filters, onlyProven: !e.target.checked } }),
+      }),
+      'Show unproven leads (unconfirmed, use judgement)',
+    ]),
+    el('label', {}, [
+      el('input', {
         type: 'checkbox', checked: state.filters.commanderOnly,
         onchange: (e) => setState({ filters: { ...state.filters, commanderOnly: e.target.checked } }),
       }),
@@ -2013,7 +2025,12 @@ function hypothesisPanel() {
 
   const list = visibleCandidates();
   if (!list.length && state.discoveryState === 'ready') {
-    frag.append(el('div', { class: 'status' }, ['No hypothesis passed the proof checks. That is the engine working as intended — it rejects more than it shows.']));
+    const hiddenUnproven = state.filters.onlyProven && state.candidates.some((c) => c.band === BAND.MEDIUM);
+    frag.append(el('div', { class: 'status' }, [
+      hiddenUnproven
+        ? 'No fully-proven hypothesis for this card. There are unproven leads with an open question mark in the proof — check "Show unproven leads" to see them, or trust the verified combos instead.'
+        : 'No hypothesis passed the proof checks. That is the engine working as intended — it rejects more than it shows.',
+    ]));
     return frag;
   }
   for (const c of list) frag.append(renderCandidate(c));

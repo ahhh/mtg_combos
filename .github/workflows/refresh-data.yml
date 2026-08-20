@@ -1,0 +1,51 @@
+# Re-bakes the verified-combo layer from Commander Spellbook's bulk export
+# and opens a PR when it changes. Card text and role catalogues are already
+# live (Scryfall, fetched at runtime), so the only thing that goes stale
+# after a new set is data/ — this is what keeps it current without a human
+# remembering to run `npm run bake` by hand.
+name: Refresh verified-combo data
+
+on:
+  schedule:
+    # Weekly. Also run manually right after a new set's cards land in
+    # Commander Spellbook (usually a few days after prerelease).
+    - cron: '0 6 * * 1'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bake:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npm run bake
+      - run: npm test
+      - id: meta
+        run: |
+          echo "generated=$(node -p "require('./data/meta.json').generated")" >> "$GITHUB_OUTPUT"
+          echo "combos=$(node -p "require('./data/meta.json').combosKept")" >> "$GITHUB_OUTPUT"
+          echo "cards=$(node -p "require('./data/meta.json').cardsIndexed")" >> "$GITHUB_OUTPUT"
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: 'data: refresh verified combos (${{ steps.meta.outputs.generated }})'
+          title: 'Refresh verified combos — ${{ steps.meta.outputs.combos }} combos / ${{ steps.meta.outputs.cards }} cards'
+          body: |
+            Automated re-bake from Commander Spellbook's bulk export.
+
+            Generated: ${{ steps.meta.outputs.generated }}
+            Combos kept: ${{ steps.meta.outputs.combos }}
+            Cards indexed: ${{ steps.meta.outputs.cards }}
+
+            `npm test` passed against the new data. Review the diff in
+            `data/meta.json` for sanity (variant/combo counts should move up,
+            not collapse), then merge to deploy.
+          branch: auto/refresh-combo-data
+          delete-branch: true
+          labels: data-refresh

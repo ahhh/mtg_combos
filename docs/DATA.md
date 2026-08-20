@@ -117,4 +117,10 @@ npm run bake                      # downloads the bulk export, rewrites data/
 npm run bake -- cached.json.gz    # reuse a local copy
 ```
 
-Re-run after upstream releases. Nothing else needs regenerating.
+`.github/workflows/refresh-data.yml` does this automatically: weekly, and
+on-demand via `workflow_dispatch`. It runs the bake, runs the test suite
+against the result, and opens a PR with the new `data/` if anything changed —
+merging it is the only manual step, and that's what triggers the Pages
+deploy. Nothing else needs regenerating after a new set: card text and the
+per-rule partner catalogues come from Scryfall live, cached for at most a
+week.
